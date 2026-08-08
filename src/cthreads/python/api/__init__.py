@@ -1,14 +1,6 @@
-from .compile import compile
-from .build import build
-from .prepare import prepare, thread
-from .CONFIG import BINARY_PATH, STORE, KERNELS
+"""
+Backward-compatible shim. Prefer `import cthreads`.
+"""
 
-__all__ = [
-    "compile",
-    "build",
-    "prepare",
-    "thread",
-    "BINARY_PATH",
-    "STORE",
-    "KERNELS",
-]
+from cthreads import *  # noqa: F403
+from cthreads import __all__  # noqa: F401

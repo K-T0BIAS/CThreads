@@ -301,8 +301,8 @@ py::list bind_args(py::dict meta, py::args args, const py::kwargs& kwargs) {
 
 } // namespace
 
-PYBIND11_MODULE(cthreads, m) {
-    m.doc() = "cthreads native core";
+PYBIND11_MODULE(_ext, m) {
+    m.doc() = "cthreads native core (_ext)";
 
     m.attr("host_os") = cthreads::kHostOS;
 
@@ -319,7 +319,7 @@ PYBIND11_MODULE(cthreads, m) {
         "Unload the kernel shared library (needed before force-rebuild on Windows)."
     );
 
-    py::class_<SpawnedKernel, std::unique_ptr<SpawnedKernel>>(m, "Thread")
+    py::class_<SpawnedKernel, std::unique_ptr<SpawnedKernel>>(m, "Job")
         .def("start", &SpawnedKernel::start)
         .def("join", &SpawnedKernel::join,
              py::call_guard<py::gil_scoped_release>())
@@ -339,7 +339,7 @@ PYBIND11_MODULE(cthreads, m) {
             }
             if (!py::hasattr(fn, "__kernel_meta__")) {
                 throw std::runtime_error(
-                    "cthreads.thread: missing __kernel_meta__ — call api.compile() first"
+                    "cthreads.thread: missing __kernel_meta__ — call cthreads.compile() first"
                 );
             }
             py::dict meta = fn.attr("__kernel_meta__").cast<py::dict>();
@@ -348,7 +348,7 @@ PYBIND11_MODULE(cthreads, m) {
         },
         py::arg("fn"),
         "Bind args/kwargs using compile-time kernel meta, pack into the DLL "
-        "trampoline, and return an unstarted Thread."
+        "trampoline, and return an unstarted Job."
     );
 
     py::module_ sync = m.def_submodule("sync", "synchronization primitives");

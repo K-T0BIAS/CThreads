@@ -21,25 +21,25 @@ if(NOT pybind11_FOUND)
     FetchContent_MakeAvailable(pybind11)
 endif()
 
-# --- Extension module: import cthreads / cthreads.sync -----------------------
-# PYBIND11_MODULE(cthreads, ...) in bindings/module.cpp
-pybind11_add_module(cthreads MODULE
+# --- Extension module: import cthreads._ext / cthreads.sync ------------------
+# PYBIND11_MODULE(_ext, ...) in bindings/module.cpp
+pybind11_add_module(_ext MODULE
     bindings/module.cpp
 )
 
-target_include_directories(cthreads PRIVATE
+target_include_directories(_ext PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/headers
 )
 
 # POSIX dynamic loader (dlopen/dlsym); Windows uses LoadLibrary from the SDK.
 if(UNIX AND NOT APPLE)
-    target_link_libraries(cthreads PRIVATE ${CMAKE_DL_LIBS})
+    target_link_libraries(_ext PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
-# Dev-friendly output: drop the .pyd/.so next to the Python package tree so
-# `PYTHONPATH=src/cthreads/python` (or adding that dir) can import `cthreads`.
-set(_cthreads_py_out "${CMAKE_CURRENT_SOURCE_DIR}/../python")
-set_target_properties(cthreads PROPERTIES
+# Drop the .pyd/.so inside the cthreads package so `import cthreads` works
+# with PYTHONPATH=src/cthreads/python.
+set(_cthreads_py_out "${CMAKE_CURRENT_SOURCE_DIR}/../python/cthreads")
+set_target_properties(_ext PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY          "${_cthreads_py_out}"
     RUNTIME_OUTPUT_DIRECTORY          "${_cthreads_py_out}"
     LIBRARY_OUTPUT_DIRECTORY_DEBUG    "${_cthreads_py_out}"
@@ -50,9 +50,9 @@ set_target_properties(cthreads PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_cthreads_py_out}"
 )
 
-install(TARGETS cthreads
-    LIBRARY DESTINATION .
-    RUNTIME DESTINATION .
+install(TARGETS _ext
+    LIBRARY DESTINATION cthreads
+    RUNTIME DESTINATION cthreads
 )
 
 message(STATUS "Python:  ${Python_EXECUTABLE} (${Python_VERSION})")

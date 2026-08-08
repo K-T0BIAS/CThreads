@@ -2,8 +2,6 @@
 Content-hash cache + write-if-changed helpers for smart compile/build.
 """
 
-from __future__ import annotations
-
 import hashlib
 import inspect
 import json
