@@ -5,4 +5,8 @@ testing/
 __Threadable__/
 __Thread__/
 *.dll
-cpp/
+build/
+cmake-build-*/
+*.pyd
+*.so
+*.dylib
