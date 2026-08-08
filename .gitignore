@@ -1,0 +1,8 @@
+__pycache__/
+venv/
+testing/
+*.pyc
+__Threadable__/
+__Thread__/
+*.dll
+cpp/
