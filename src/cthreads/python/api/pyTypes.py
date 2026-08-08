@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 
+from .Threadable.lib import is_internal_cthreads_type
+
 
 @dataclass
 class PyType:
@@ -191,6 +193,40 @@ class PyThreadable(PyType):
         return f'#include "{self.cpp_include}"\n'
 
 
+# Native sync types shipped in the pybind module (not codegen'd as Threadables).
+# keyed by Python class __name__ as exposed on cthreads.sync
+CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
+    "Lock": {
+        "cpp_name": "cthreads::sync::Lock",
+        "cpp_include": "pyLock.hpp",
+    },
+    "Event": {
+        "cpp_name": "cthreads::sync::Event",
+        "cpp_include": "pyEvent.hpp",
+    },
+    "RWLock": {
+        "cpp_name": "cthreads::sync::RWLock",
+        "cpp_include": "pyRWLock.hpp",
+    },
+}
+
+
+class PyCthreadsInternal(PyType):
+    """Maps a marked cthreads.sync type to its existing C++ class + header."""
+
+    def __init__(self, py_name: str, cpp_name: str, cpp_include: str) -> None:
+        super().__init__(
+            name=py_name,
+            cpp_name=cpp_name,
+            description=cpp_name,
+            cpp_include=cpp_include,
+            needs_include=True,
+        )
+
+    def build_include(self) -> str:
+        return f'#include "{self.cpp_include}"\n'
+
+
 def hint_to_pytype(hint: Any) -> PyType:
     """
     Helper to build PyType from a python type hint
@@ -207,6 +243,7 @@ def hint_to_pytype(hint: Any) -> PyType:
         hint_to_pytype(dict[str, int]) -> PyDict(PyString(), PyInt())
         hint_to_pytype(Threadable) -> PyThreadable("Threadable", "Threadable.hpp")
     """
+
     origin = get_origin(hint)
     # chec for generic types
     if origin is list:
@@ -227,6 +264,19 @@ def hint_to_pytype(hint: Any) -> PyType:
     }
     if hint in primitives:
         return primitives[hint]()
+
+    # cthreads.sync.* marked with __cthreads_internal__ — link headers, don't generate
+    if is_internal_cthreads_type(hint):
+        entry = CTHREADS_INTERNAL_TYPES.get(hint.__name__)
+        if entry is None:
+            raise TypeError(
+                f"Internal cthreads type {hint.__name__!r} is not in CTHREADS_INTERNAL_TYPES"
+            )
+        return PyCthreadsInternal(
+            py_name=hint.__name__,
+            cpp_name=entry["cpp_name"],
+            cpp_include=entry["cpp_include"],
+        )
 
     # if the hint points to a @Threadable class it must be resolved to ensure correct includes
     if isinstance(hint, type) and getattr(hint, "__threadable", False):

@@ -10,6 +10,9 @@ TYPE_WHITELIST = [
     set,
 ]
 
+def is_internal_cthreads_type(item: Any) -> bool:
+    return isinstance(item, type) and getattr(item, "__cthreads_internal__", False)
+
 def is_threadable(item: Any) -> bool:
     """
     Check if the type hint is allowed in a Threadable class.
@@ -32,6 +35,8 @@ def is_threadable(item: Any) -> bool:
         return True
 
     if item in TYPE_WHITELIST:
+        return True
+    if is_internal_cthreads_type(item):
         return True
     if isinstance(item, type) and getattr(item, "__threadable", False):
         return True

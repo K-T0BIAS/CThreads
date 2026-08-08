@@ -63,7 +63,7 @@ class TranslateResult:
     body_includes: list[str]
 
     def free_signature(self) -> str:
-        return f"{self.return_type} {self.func_name}({self.params_csv})"
+        return f'extern "C" {self.return_type} {self.func_name}({self.params_csv})'
 
     def method_decl(self) -> str:
         return f"    {self.return_type} {self.func_name}({self.params_csv});"

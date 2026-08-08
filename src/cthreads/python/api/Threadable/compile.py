@@ -56,10 +56,29 @@ def compile_threadable(cls: type, methods: list) -> None:
     if method_decls:
         method_decls += "\n"
 
+    # Stable C exports for dispatch (member fns themselves can't be extern "C").
+    c_wrappers_decl: list[str] = []
+    c_wrappers_def: list[str] = []
+    for result in method_results:
+        export = f"{name}_{result.func_name}"
+        # self as pointer for C linkage
+        params = result.params_csv
+        c_params = f"{name}* self" + (f", {params}" if params else "")
+        c_sig = f'extern "C" {result.return_type} {export}({c_params})'
+        c_wrappers_decl.append(f"{c_sig};")
+        call_args = params  # same names as C++ method params
+        if result.return_type == "void":
+            body = f"    self->{result.func_name}({call_args});\n"
+        else:
+            body = f"    return self->{result.func_name}({call_args});\n"
+        c_wrappers_def.append(f"{c_sig} {{\n{body}}}")
+
     hpp = "#pragma once\n\n"
     if include_block:
         hpp += include_block + "\n"
     hpp += f"struct {name} {{\n{field_block}{method_decls}}};\n"
+    if c_wrappers_decl:
+        hpp += "\n" + "\n".join(c_wrappers_decl) + "\n"
 
     cpp = f'#include "{name}.hpp"\n'
     body_extra_seen = set(includes)
@@ -71,6 +90,8 @@ def compile_threadable(cls: type, methods: list) -> None:
                 body_extra_seen.add(line)
                 cpp += line
         cpp += f"\n{result.method_def_signature(name)} {{\n{result.body}}}\n"
+    for wrapper in c_wrappers_def:
+        cpp += f"\n{wrapper}\n"
 
     hpp_path.write_text(hpp, encoding="utf-8")
     cpp_path.write_text(cpp, encoding="utf-8")

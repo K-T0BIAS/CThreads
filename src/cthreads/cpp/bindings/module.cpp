@@ -11,7 +11,7 @@ PYBIND11_MODULE(cthreads, m) {
 
     py::module_ sync = m.def_submodule("sync", "synchronization primitives");
 
-    py::class_<cthreads::sync::Lock>(sync, "Lock")
+    auto lock = py::class_<cthreads::sync::Lock>(sync, "Lock")
         .def(py::init<>())
         .def("acquire", &cthreads::sync::Lock::acquire,
              py::call_guard<py::gil_scoped_release>())
@@ -27,7 +27,9 @@ PYBIND11_MODULE(cthreads, m) {
             self.release();
         });
 
-    py::class_<cthreads::sync::Event>(sync, "Event")
+     lock.attr("__cthreads_internal__") = true;
+
+    auto event = py::class_<cthreads::sync::Event>(sync, "Event")
         .def(py::init<>())
         .def("set", &cthreads::sync::Event::set)
         .def("clear", &cthreads::sync::Event::clear)
@@ -38,7 +40,9 @@ PYBIND11_MODULE(cthreads, m) {
              py::arg("seconds"),
              py::call_guard<py::gil_scoped_release>());
 
-    py::class_<cthreads::sync::RWLock>(sync, "RWLock")
+     event.attr("__cthreads_internal__") = true;
+
+    auto rwlock = py::class_<cthreads::sync::RWLock>(sync, "RWLock")
         .def(py::init<>())
         .def("acquire_read", &cthreads::sync::RWLock::acquire_read,
              py::call_guard<py::gil_scoped_release>())
@@ -50,4 +54,6 @@ PYBIND11_MODULE(cthreads, m) {
         .def("release_write", &cthreads::sync::RWLock::release_write)
         .def("try_acquire_write", &cthreads::sync::RWLock::try_acquire_write,
              py::call_guard<py::gil_scoped_release>());
+
+     rwlock.attr("__cthreads_internal__") = true;
 }
