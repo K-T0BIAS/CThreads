@@ -30,7 +30,9 @@ def Threadable(cls):
     cls.__threadable = True
     cls.__threadable_version = VERSION
 
-    anno_dict: dict[str, Any] = get_type_hints(cls)
+    # localns includes the class so self-refs (list[Boid] / list["Boid"]) resolve
+    # while the decorator is still running.
+    anno_dict: dict[str, Any] = get_type_hints(cls, localns={cls.__name__: cls})
     for hint in anno_dict.values():
         try:
             is_threadable(hint)

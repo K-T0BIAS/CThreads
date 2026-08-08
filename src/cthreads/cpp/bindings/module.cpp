@@ -7,6 +7,7 @@
 #include "../headers/pyRWLock.hpp"
 #include "../headers/pyThread.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,135 +36,46 @@ void fill_pack_from_values(
     const std::string& symbol,
     const py::list& params,
     const py::list& values,
-    void* pack
+    void* pack,
+    py::dict types,
+    py::dict schemas
 ) {
-    auto& lib = cthreads::kernels();
-    for (size_t i = 0; i < params.size(); ++i) {
-        py::dict p = params[i].cast<py::dict>();
-        const std::string kind = p["kind"].cast<std::string>();
-        const std::string setter = symbol + "__set_a" + std::to_string(i);
-        py::object val = values[i];
-
-        if (kind == "int") {
-            using Fn = void (*)(void*, int);
-            lib.get<Fn>(setter.c_str())(pack, val.cast<int>());
-        } else if (kind == "float") {
-            using Fn = void (*)(void*, double);
-            lib.get<Fn>(setter.c_str())(pack, val.cast<double>());
-        } else if (kind == "bool") {
-            using Fn = void (*)(void*, bool);
-            lib.get<Fn>(setter.c_str())(pack, val.cast<bool>());
-        } else if (kind == "threadable") {
-            py::list fields = p["fields"].cast<py::list>();
-            // Build positional field values from object attrs or mapping.
-            std::vector<py::object> field_vals;
-            field_vals.reserve(fields.size());
-            for (py::handle fh : fields) {
-                py::dict f = fh.cast<py::dict>();
-                const std::string fname = f["name"].cast<std::string>();
-                if (py::isinstance<py::dict>(val)) {
-                    field_vals.push_back(val[py::str(fname)]);
-                } else {
-                    field_vals.push_back(val.attr(fname.c_str()));
-                }
-            }
-            // Only the field layouts we emit: all-float Particle-style, or mixed.
-            // Call through a small switch on field count + kinds.
-            if (fields.size() == 3
-                && fields[0].cast<py::dict>()["kind"].cast<std::string>() == "float"
-                && fields[1].cast<py::dict>()["kind"].cast<std::string>() == "float"
-                && fields[2].cast<py::dict>()["kind"].cast<std::string>() == "float") {
-                using Fn = void (*)(void*, double, double, double);
-                lib.get<Fn>(setter.c_str())(
-                    pack,
-                    field_vals[0].cast<double>(),
-                    field_vals[1].cast<double>(),
-                    field_vals[2].cast<double>()
-                );
-            } else {
-                throw std::runtime_error(
-                    "cthreads.thread: unsupported Threadable field layout for '" +
-                    symbol + "' a" + std::to_string(i)
-                );
-            }
-        } else if (kind == "list") {
-            const std::string inner = p["list_inner"].cast<std::string>();
-            if (inner == "float") {
-                auto vec = val.cast<std::vector<double>>();
-                using Fn = void (*)(void*, const double*, size_t);
-                lib.get<Fn>(setter.c_str())(pack, vec.data(), vec.size());
-            } else if (inner == "int") {
-                auto vec = val.cast<std::vector<int>>();
-                using Fn = void (*)(void*, const int*, size_t);
-                lib.get<Fn>(setter.c_str())(pack, vec.data(), vec.size());
-            } else {
-                throw std::runtime_error(
-                    "cthreads.thread: unsupported list inner type '" + inner + "'"
-                );
-            }
-        } else {
-            throw std::runtime_error(
-                "cthreads.thread: unsupported param kind '" + kind + "'"
-            );
-        }
-    }
+    py::module_ marshal = py::module_::import("cthreads.marshal");
+    marshal.attr("pack_params")(
+        symbol,
+        params,
+        values,
+        reinterpret_cast<std::uintptr_t>(pack),
+        types,
+        schemas
+    );
 }
 
-void writeback_threadables(
+void writeback_params(
     const std::string& symbol,
     const py::list& params,
     const py::list& values,
-    void* pack
+    void* pack,
+    py::dict types,
+    py::dict schemas
 ) {
-    auto& lib = cthreads::kernels();
-    for (size_t i = 0; i < params.size(); ++i) {
-        py::dict p = params[i].cast<py::dict>();
-        if (p["kind"].cast<std::string>() != "threadable") {
-            continue;
-        }
-        py::object val = values[i];
-        if (py::isinstance<py::dict>(val)) {
-            continue; // no object to write back into
-        }
-        py::list fields = p["fields"].cast<py::list>();
-        const std::string getter = symbol + "__get_a" + std::to_string(i);
-        if (fields.size() == 3
-            && fields[0].cast<py::dict>()["kind"].cast<std::string>() == "float"
-            && fields[1].cast<py::dict>()["kind"].cast<std::string>() == "float"
-            && fields[2].cast<py::dict>()["kind"].cast<std::string>() == "float") {
-            double x = 0, y = 0, v = 0;
-            using Fn = void (*)(void*, double*, double*, double*);
-            lib.get<Fn>(getter.c_str())(pack, &x, &y, &v);
-            const std::string n0 = fields[0].cast<py::dict>()["name"].cast<std::string>();
-            const std::string n1 = fields[1].cast<py::dict>()["name"].cast<std::string>();
-            const std::string n2 = fields[2].cast<py::dict>()["name"].cast<std::string>();
-            val.attr(n0.c_str()) = x;
-            val.attr(n1.c_str()) = y;
-            val.attr(n2.c_str()) = v;
-        }
-    }
+    py::module_ marshal = py::module_::import("cthreads.marshal");
+    marshal.attr("writeback_params")(
+        symbol,
+        params,
+        values,
+        reinterpret_cast<std::uintptr_t>(pack),
+        types,
+        schemas
+    );
 }
 
-py::object read_return(
-    const std::string& symbol,
-    const std::string& return_kind,
-    void* pack
-) {
-    if (return_kind == "void") {
-        return py::none();
-    }
-    auto& lib = cthreads::kernels();
-    const std::string getter = symbol + "__get_ret";
-    if (return_kind == "int") {
-        return py::int_(lib.get<int (*)(void*)>(getter.c_str())(pack));
-    }
-    if (return_kind == "float") {
-        return py::float_(lib.get<double (*)(void*)>(getter.c_str())(pack));
-    }
-    if (return_kind == "bool") {
-        return py::bool_(lib.get<bool (*)(void*)>(getter.c_str())(pack));
-    }
-    return py::none();
+py::object read_return(py::dict meta, void* pack) {
+    py::module_ marshal = py::module_::import("cthreads.marshal");
+    return marshal.attr("unpack_return")(
+        meta,
+        reinterpret_cast<std::uintptr_t>(pack)
+    );
 }
 
 std::unique_ptr<SpawnedKernel> spawn_from_meta(
@@ -181,7 +93,6 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
     const std::string call_sym = meta["call_symbol"].cast<std::string>();
     const std::string new_sym = meta["args_new_symbol"].cast<std::string>();
     const std::string free_sym = meta["args_free_symbol"].cast<std::string>();
-    const std::string return_kind = meta["return_kind"].cast<std::string>();
     py::list params = meta["params"].cast<py::list>();
 
     if (ordered_values.size() != params.size()) {
@@ -205,7 +116,15 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
 
     void* pack = cthreads::kernels().get<NewFn>(new_sym.c_str())();
     try {
-        fill_pack_from_values(symbol, params, ordered_values, pack);
+        py::dict types = py::dict();
+        py::dict schemas = py::dict();
+        if (meta.contains("types")) {
+            types = meta["types"].cast<py::dict>();
+        }
+        if (meta.contains("schemas")) {
+            schemas = meta["schemas"].cast<py::dict>();
+        }
+        fill_pack_from_values(symbol, params, ordered_values, pack, types, schemas);
     } catch (...) {
         cthreads::kernels().get<FreeFn>(free_sym.c_str())(pack);
         throw;
@@ -219,17 +138,27 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
     CallFn call_fn = cthreads::kernels().get<CallFn>(call_sym.c_str());
     FreeFn free_fn = cthreads::kernels().get<FreeFn>(free_sym.c_str());
 
-    auto job = [call_fn, free_fn, pack, result_slot, values_keep, meta_keep, symbol, return_kind]() mutable {
+    auto job = [call_fn, free_fn, pack, result_slot, values_keep, meta_keep, symbol]() mutable {
         call_fn(pack);
         {
             py::gil_scoped_acquire gil;
-            writeback_threadables(
+            py::dict types = py::dict();
+            py::dict schemas = py::dict();
+            if (meta_keep->contains("types")) {
+                types = (*meta_keep)["types"].cast<py::dict>();
+            }
+            if (meta_keep->contains("schemas")) {
+                schemas = (*meta_keep)["schemas"].cast<py::dict>();
+            }
+            writeback_params(
                 symbol,
                 (*meta_keep)["params"].cast<py::list>(),
                 *values_keep,
-                pack
+                pack,
+                types,
+                schemas
             );
-            *result_slot = read_return(symbol, return_kind, pack);
+            *result_slot = read_return(*meta_keep, pack);
         }
         free_fn(pack);
         pack = nullptr;
@@ -311,6 +240,17 @@ PYBIND11_MODULE(_ext, m) {
         &cthreads::load_kernels,
         py::arg("path"),
         "Load the shared library produced by api.build() (BINARY_PATH)."
+    );
+
+    m.def(
+        "kernel_path",
+        []() -> py::object {
+            if (!cthreads::kernels().loaded()) {
+                return py::none();
+            }
+            return py::str(cthreads::kernels().path());
+        },
+        "Path of the currently loaded kernel shared library, or None."
     );
 
     m.def(

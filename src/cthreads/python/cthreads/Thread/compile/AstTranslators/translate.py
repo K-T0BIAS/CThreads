@@ -51,6 +51,7 @@ from . import (
     name,
     passStmt,
     returnStmt,
+    subscript,
     unaryOp,
     whileStmt,
 )
@@ -61,6 +62,7 @@ EXPR_TRANSLATORS: dict[type, ExprTranslator] = {
     ast.Constant: constant.translate,
     ast.Name: name.translate,
     ast.Attribute: attribute.translate,
+    ast.Subscript: subscript.translate,
     ast.BinOp: binOp.translate,
     ast.UnaryOp: unaryOp.translate,
     ast.Compare: compare.translate,

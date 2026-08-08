@@ -26,6 +26,13 @@ from ._ext import (
     unload_kernels,
     host_os,
 )
+
+try:
+    from ._ext import kernel_path
+except ImportError:  # older _ext wheel before marshal refactor
+    def kernel_path():
+        return None
+
 from ._ext import thread as spawn  # low-level: no compile/build
 
 __all__ = [
@@ -40,6 +47,7 @@ __all__ = [
     "sync",
     "load_kernels",
     "unload_kernels",
+    "kernel_path",
     "host_os",
     "BINARY_PATH",
     "STORE",
