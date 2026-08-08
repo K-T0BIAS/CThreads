@@ -1,5 +1,5 @@
 """
-Drain REGISTRY → generate C++ → fill STORE.
+Drain REGISTRY -> generate C++ -> fill STORE.
 
 Call explicitly (later: from the thread dispatch binding). Order:
   1. all @Threadable classes (struct + @Thread methods)
@@ -8,7 +8,7 @@ Call explicitly (later: from the thread dispatch binding). Order:
 
 import inspect
 
-from .CONFIG import REGISTRY
+from .CONFIG import REGISTRY, KERNELS
 
 
 def compile() -> None:
@@ -23,6 +23,7 @@ def compile() -> None:
     from .Thread.compile.compile import compile_free_thread # compile free @Thread functions
     from .Threadable.compile import compile_threadable # compile @Threadable classes
 
+    KERNELS.clear()
     claimed_methods: set[str] = set() # set of methods that have been claimed by a @Threadable class
 
     for cls in list(REGISTRY.threadables.values()): # iterate over all @Threadable classes

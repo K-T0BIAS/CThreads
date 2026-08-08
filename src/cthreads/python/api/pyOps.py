@@ -15,7 +15,7 @@ BINOPS: dict[type, str] = {
     ast.Add: "+",
     ast.Sub: "-",
     ast.Mult: "*",
-    ast.Div: "/",          # Python 3 `/` is true division → usually C++ `/` on doubles
+    ast.Div: "/",          # Python 3 `/` is true division -> usually C++ `/` on doubles
     ast.FloorDiv: "/",     # `//` — only valid for ints in our subset; revisit later
     ast.Mod: "%",
     ast.Pow: "",           # no C++ `**`; use std::pow later or reject

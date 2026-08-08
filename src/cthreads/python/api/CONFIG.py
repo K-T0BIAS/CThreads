@@ -6,6 +6,9 @@ STORE: dict[str, str] = {}
 # Set by api.build.build() — shared library path for thread dispatch
 BINARY_PATH: str | None = None
 
+# Filled by compile(): symbol -> KernelMeta (dispatch schema)
+KERNELS: dict = {}
+
 
 class _Registry:
     """

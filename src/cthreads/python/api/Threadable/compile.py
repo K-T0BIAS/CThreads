@@ -5,6 +5,7 @@ from typing import get_type_hints
 from ..pyTypes import hint_to_pytype
 from ..CONFIG import STORE, VERSION
 from ..Thread.compile.compile import translate_thread
+from ..kernel_meta import build_kernel_meta, emit_trampoline_cpp, emit_trampoline_decls
 
 
 def compile_threadable(cls: type, methods: list) -> None:
@@ -59,13 +60,14 @@ def compile_threadable(cls: type, methods: list) -> None:
     # Stable C exports for dispatch (member fns themselves can't be extern "C").
     c_wrappers_decl: list[str] = []
     c_wrappers_def: list[str] = []
-    for result in method_results:
+    trampoline_defs: list[str] = []
+    trampoline_decls: list[str] = []
+    for fn, result in zip(methods, method_results):
         export = f"{name}_{result.func_name}"
         params = result.params_csv
         c_params = f"{name}* self" + (f", {params}" if params else "")
-        c_sig = f'extern "C" {result.return_type} {export}({c_params})'
+        c_sig = f"CTHREADS_API {result.return_type} {export}({c_params})"
         c_wrappers_decl.append(f"{c_sig};")
-        # params_csv is "double dt, int n" — call needs "dt, n"
         call_args = ", ".join(
             part.strip().split()[-1].lstrip("&*")
             for part in params.split(",")
@@ -77,12 +79,36 @@ def compile_threadable(cls: type, methods: list) -> None:
             body = f"    return self->{result.func_name}({call_args});\n"
         c_wrappers_def.append(f"{c_sig} {{\n{body}}}")
 
+        meta = build_kernel_meta(
+            fn, symbol=export, owner_name=name, owner_cls=cls
+        )
+        trampoline_decls.append(emit_trampoline_decls(meta))
+        trampoline_defs.append(emit_trampoline_cpp(meta, real_call=export))
+
+    # Shared export macro (same file free Threads write; keep in sync).
+    thread_dir = src_file.parent / "__Thread__"
+    thread_dir.mkdir(parents=True, exist_ok=True)
+    export_hpp = (
+        "#pragma once\n\n"
+        "#ifndef CTHREADS_API\n"
+        "#  if defined(_WIN32)\n"
+        "#    define CTHREADS_API extern \"C\" __declspec(dllexport)\n"
+        "#  else\n"
+        "#    define CTHREADS_API extern \"C\"\n"
+        "#  endif\n"
+        "#endif\n"
+    )
+    (thread_dir / "cthreads_export.hpp").write_text(export_hpp, encoding="utf-8")
+
     hpp = "#pragma once\n\n"
+    hpp += '#include "../__Thread__/cthreads_export.hpp"\n\n'
     if include_block:
         hpp += include_block + "\n"
     hpp += f"struct {name} {{\n{field_block}{method_decls}}};\n"
     if c_wrappers_decl:
         hpp += "\n" + "\n".join(c_wrappers_decl) + "\n"
+    if trampoline_decls:
+        hpp += "\n" + "".join(trampoline_decls)
 
     cpp = f'#include "{name}.hpp"\n'
     body_extra_seen = set(includes)
@@ -96,6 +122,8 @@ def compile_threadable(cls: type, methods: list) -> None:
         cpp += f"\n{result.method_def_signature(name)} {{\n{result.body}}}\n"
     for wrapper in c_wrappers_def:
         cpp += f"\n{wrapper}\n"
+    for block in trampoline_defs:
+        cpp += "\n" + block
 
     hpp_path.write_text(hpp, encoding="utf-8")
     cpp_path.write_text(cpp, encoding="utf-8")

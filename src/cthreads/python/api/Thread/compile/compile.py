@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, get_type_hints
 
 from ...CONFIG import STORE, VERSION
+from ...kernel_meta import build_kernel_meta, emit_trampoline_cpp, emit_trampoline_decls
 from .AstTranslators import translate_function
 from .AstTranslators.translate import TranslateResult
 from .lib import parse_function_def
@@ -34,22 +35,38 @@ def compile_free_thread(fn) -> None:
 
     result = translate_thread(fn, owner_name=None)
     signature = result.free_signature()
+    meta = build_kernel_meta(fn, symbol=name, owner_name=None)
 
     seen_sig = set(result.sig_includes)
     extra_body = "".join(
         line for line in result.body_includes if line not in seen_sig
     )
 
+    export_hpp = (
+        "#pragma once\n\n"
+        "#ifndef CTHREADS_API\n"
+        "#  if defined(_WIN32)\n"
+        "#    define CTHREADS_API extern \"C\" __declspec(dllexport)\n"
+        "#  else\n"
+        "#    define CTHREADS_API extern \"C\"\n"
+        "#  endif\n"
+        "#endif\n"
+    )
+    (out_dir / "cthreads_export.hpp").write_text(export_hpp, encoding="utf-8")
+
     hpp = "#pragma once\n\n"
+    hpp += '#include "cthreads_export.hpp"\n\n'
     hpp += "".join(result.sig_includes)
     if result.sig_includes:
         hpp += "\n"
     hpp += f"{signature};\n"
+    hpp += emit_trampoline_decls(meta)
 
     cpp = f'#include "{name}.hpp"\n'
     if extra_body:
         cpp += "\n" + extra_body
     cpp += f"\n{signature} {{\n{result.body}}}\n"
+    cpp += "\n" + emit_trampoline_cpp(meta, real_call=name)
 
     hpp_path.write_text(hpp, encoding="utf-8")
     cpp_path.write_text(cpp, encoding="utf-8")

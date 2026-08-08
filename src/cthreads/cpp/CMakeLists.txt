@@ -31,6 +31,11 @@ target_include_directories(cthreads PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/headers
 )
 
+# POSIX dynamic loader (dlopen/dlsym); Windows uses LoadLibrary from the SDK.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(cthreads PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 # Dev-friendly output: drop the .pyd/.so next to the Python package tree so
 # `PYTHONPATH=src/cthreads/python` (or adding that dir) can import `cthreads`.
 set(_cthreads_py_out "${CMAKE_CURRENT_SOURCE_DIR}/../python")
