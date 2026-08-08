@@ -43,6 +43,7 @@ from . import (
     compare,
     constant,
     exprStmt,
+    forStmt,
     ifStmt,
     name,
     passStmt,
@@ -69,6 +70,7 @@ STMT_TRANSLATORS: dict[type, StmtTranslator] = {
     ast.Return: returnStmt.translate,
     ast.Expr: exprStmt.translate,
     ast.If: ifStmt.translate,
+    ast.For: forStmt.translate,
 }
 
 
