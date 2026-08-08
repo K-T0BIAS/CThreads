@@ -40,8 +40,11 @@ from . import (
     attribute,
     augAssign,
     binOp,
+    boolOp,
+    breakStmt,
     compare,
     constant,
+    continueStmt,
     exprStmt,
     forStmt,
     ifStmt,
@@ -49,6 +52,7 @@ from . import (
     passStmt,
     returnStmt,
     unaryOp,
+    whileStmt,
 )
 from .context import ExprTranslator, StmtTranslator, TranslateContext
 from .signature import SignatureParts, translate_signature
@@ -60,6 +64,7 @@ EXPR_TRANSLATORS: dict[type, ExprTranslator] = {
     ast.BinOp: binOp.translate,
     ast.UnaryOp: unaryOp.translate,
     ast.Compare: compare.translate,
+    ast.BoolOp: boolOp.translate,
 }
 
 STMT_TRANSLATORS: dict[type, StmtTranslator] = {
@@ -71,6 +76,9 @@ STMT_TRANSLATORS: dict[type, StmtTranslator] = {
     ast.Expr: exprStmt.translate,
     ast.If: ifStmt.translate,
     ast.For: forStmt.translate,
+    ast.While: whileStmt.translate,
+    ast.Break: breakStmt.translate,
+    ast.Continue: continueStmt.translate,
 }
 
 

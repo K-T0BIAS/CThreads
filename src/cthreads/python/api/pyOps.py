@@ -43,3 +43,9 @@ CMPOPS: dict[type, str] = {
     ast.GtE: ">=",
     # ast.Is / ast.In etc. have no direct C++ map for our numeric subset
 }
+
+# BoolOps live on ast.BoolOp.op; values are C++ tokens (short-circuit)
+BOOLOPS: dict[type, str] = {
+    ast.And: "&&",
+    ast.Or: "||",
+}
