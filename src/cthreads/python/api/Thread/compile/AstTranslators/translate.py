@@ -34,7 +34,21 @@ import ast
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from . import annAssign, attribute, augAssign, binOp, constant, name, passStmt, unaryOp
+from . import (
+    annAssign,
+    assign,
+    attribute,
+    augAssign,
+    binOp,
+    compare,
+    constant,
+    exprStmt,
+    ifStmt,
+    name,
+    passStmt,
+    returnStmt,
+    unaryOp,
+)
 from .context import ExprTranslator, StmtTranslator, TranslateContext
 from .signature import SignatureParts, translate_signature
 
@@ -44,12 +58,17 @@ EXPR_TRANSLATORS: dict[type, ExprTranslator] = {
     ast.Attribute: attribute.translate,
     ast.BinOp: binOp.translate,
     ast.UnaryOp: unaryOp.translate,
+    ast.Compare: compare.translate,
 }
 
 STMT_TRANSLATORS: dict[type, StmtTranslator] = {
     ast.AnnAssign: annAssign.translate,
+    ast.Assign: assign.translate,
     ast.AugAssign: augAssign.translate,
     ast.Pass: passStmt.translate,
+    ast.Return: returnStmt.translate,
+    ast.Expr: exprStmt.translate,
+    ast.If: ifStmt.translate,
 }
 
 

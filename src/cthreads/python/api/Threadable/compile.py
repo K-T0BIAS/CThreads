@@ -61,12 +61,16 @@ def compile_threadable(cls: type, methods: list) -> None:
     c_wrappers_def: list[str] = []
     for result in method_results:
         export = f"{name}_{result.func_name}"
-        # self as pointer for C linkage
         params = result.params_csv
         c_params = f"{name}* self" + (f", {params}" if params else "")
         c_sig = f'extern "C" {result.return_type} {export}({c_params})'
         c_wrappers_decl.append(f"{c_sig};")
-        call_args = params  # same names as C++ method params
+        # params_csv is "double dt, int n" — call needs "dt, n"
+        call_args = ", ".join(
+            part.strip().split()[-1].lstrip("&*")
+            for part in params.split(",")
+            if part.strip()
+        ) if params.strip() else ""
         if result.return_type == "void":
             body = f"    self->{result.func_name}({call_args});\n"
         else:
