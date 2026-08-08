@@ -146,12 +146,13 @@ def build(
     Returns:
         Path to the built shared library
     """
-    from .cache import hash_files, load_cache, save_cache
+    from .cache import ensure_gitignore, hash_files, load_cache, save_cache
 
     compiler, flavor = _detect_compiler()
     sources, include_dirs = _collect_sources_and_includes()
     root = Path(project_root).resolve() if project_root else _project_root_from_store()
     root.mkdir(parents=True, exist_ok=True)
+    ensure_gitignore(root)
 
     out = root / _binary_name()
     link_hash = hash_files(sources) + "|" + flavor

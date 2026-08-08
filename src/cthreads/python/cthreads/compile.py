@@ -10,7 +10,7 @@ import inspect
 from pathlib import Path
 
 from .CONFIG import REGISTRY, KERNELS, STORE
-from .cache import load_cache, save_cache
+from .cache import ensure_gitignore, load_cache, save_cache
 
 
 def compile(force: bool = False) -> dict:
@@ -42,6 +42,7 @@ def compile(force: bool = False) -> dict:
         raise RuntimeError("Nothing registered to compile")
 
     root = Path(inspect.getfile(sample)).resolve().parent
+    ensure_gitignore(root)
     cache = load_cache(root)
 
     for cls in list(REGISTRY.threadables.values()):

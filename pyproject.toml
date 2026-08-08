@@ -1,0 +1,75 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.10",
+    "pybind11>=2.13",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cthreads"
+version = "0.1.0"
+description = "Compile @Threadable / @Thread Python into native C++ kernels and run them off the GIL."
+requires-python = ">=3.10"
+keywords = ["threading", "codegen", "cpp", "pybind11"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Code Generators",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+dev = ["pytest>=8", "build", "scikit-build-core>=0.10"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.source-dir = "src/cthreads/cpp"
+cmake.build-type = "Release"
+# Persistent out-of-tree build — never use editable.mode=inplace with
+# cmake.source-dir pointing at cpp/ (that dumps MSVC/CMake litter into sources).
+build-dir = "build/{wheel_tag}"
+wheel.packages = [
+    "src/cthreads/python/cthreads",
+    "src/cthreads/python/api",
+]
+wheel.exclude = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyd",
+    "**/*.so",
+    "**/*.dylib",
+]
+sdist.include = [
+    "src/cthreads/cpp/**",
+    "src/cthreads/python/cthreads/**",
+    "src/cthreads/python/api/**",
+    "tests/**",
+]
+sdist.exclude = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyd",
+    "**/*.so",
+    "**/*.dylib",
+    "venv/**",
+    "testing/**",
+    "build/**",
+    ".pytest_cache/**",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src/cthreads/python", "tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "integration: needs compiler / native extension end-to-end",
+]

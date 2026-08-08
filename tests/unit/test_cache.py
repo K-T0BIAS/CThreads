@@ -85,3 +85,26 @@ def test_hash_files_order_independent_by_name(tmp_path: Path):
     assert hash_files([a, b]) == hash_files([b, a])
     b.write_text("C", encoding="utf-8")
     assert hash_files([a, b]) != hash_files([a])
+
+
+def test_ensure_gitignore_creates_and_is_idempotent(tmp_path: Path):
+    from cthreads.cache import ensure_gitignore
+
+    assert ensure_gitignore(tmp_path) is True
+    text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "__Thread__/" in text
+    assert ".cthreads_cache.json" in text
+    assert "cthreads_kernels.dll" in text
+    assert ensure_gitignore(tmp_path) is False
+
+
+def test_ensure_gitignore_appends_to_existing(tmp_path: Path):
+    from cthreads.cache import ensure_gitignore
+
+    gi = tmp_path / ".gitignore"
+    gi.write_text("venv/\n", encoding="utf-8")
+    assert ensure_gitignore(tmp_path) is True
+    text = gi.read_text(encoding="utf-8")
+    assert text.startswith("venv/\n")
+    assert "# >>> cthreads (auto)" in text
+    assert ensure_gitignore(tmp_path) is False

@@ -12,6 +12,19 @@ from .CONFIG import VERSION
 
 CACHE_FILENAME = ".cthreads_cache.json"
 
+# Managed block written into the user project root `.gitignore` on compile/build.
+_GITIGNORE_BEGIN = "# >>> cthreads (auto)"
+_GITIGNORE_END = "# <<< cthreads (auto)"
+_GITIGNORE_PATTERNS = (
+    "__Thread__/",
+    "__Threadable__/",
+    ".cthreads_cache.json",
+    "cthreads_kernels.dll",
+    "cthreads_kernels.so",
+    "libcthreads_kernels.so",
+    "libcthreads_kernels.dylib",
+)
+
 
 def sha256_text(*parts: str) -> str:
     h = hashlib.sha256()
@@ -82,3 +95,48 @@ def hash_files(paths: list[Path]) -> str:
         h.update(path.read_bytes())
         h.update(b"\0")
     return h.hexdigest()
+
+
+def ensure_gitignore(root: Path) -> bool:
+    """
+    Create or update ``root/.gitignore`` so codegen / link artifacts stay untracked.
+
+    Idempotent: inserts a managed ``>>> cthreads (auto)`` block, or refreshes it
+    if the patterns changed. Returns True if the file was created or modified.
+    """
+    root = Path(root)
+    path = root / ".gitignore"
+    block = (
+        _GITIGNORE_BEGIN
+        + "\n"
+        + "\n".join(_GITIGNORE_PATTERNS)
+        + "\n"
+        + _GITIGNORE_END
+        + "\n"
+    )
+
+    existing = ""
+    if path.is_file():
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+
+    begin = existing.find(_GITIGNORE_BEGIN)
+    end = existing.find(_GITIGNORE_END)
+    if begin != -1 and end != -1 and end > begin:
+        end_line = end + len(_GITIGNORE_END)
+        if end_line < len(existing) and existing[end_line] == "\n":
+            end_line += 1
+        updated = existing[:begin] + block + existing[end_line:]
+    elif existing.strip():
+        sep = "" if existing.endswith("\n") else "\n"
+        updated = existing + sep + "\n" + block
+    else:
+        updated = block
+
+    if updated == existing:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(updated, encoding="utf-8")
+    return True
