@@ -10,3 +10,4 @@ cmake-build-*/
 *.pyd
 *.so
 *.dylib
+.cthreads_cache.json

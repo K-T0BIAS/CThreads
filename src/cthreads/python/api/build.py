@@ -132,22 +132,39 @@ def _binary_name() -> str:
     return f"lib{BINARY_STEM}.so"
 
 
-def build(project_root: Path | None = None) -> Path:
+def build(
+    project_root: Path | None = None,
+    force: bool = False,
+) -> Path:
     """
     Compile all STORE-backed .cpp files into one shared library.
 
     Args:
         project_root: where to place the binary; default = inferred from STORE
+        force: if True, always relink even when link_hash matches
 
     Returns:
         Path to the built shared library
     """
+    from .cache import hash_files, load_cache, save_cache
+
     compiler, flavor = _detect_compiler()
     sources, include_dirs = _collect_sources_and_includes()
     root = Path(project_root).resolve() if project_root else _project_root_from_store()
     root.mkdir(parents=True, exist_ok=True)
 
     out = root / _binary_name()
+    link_hash = hash_files(sources) + "|" + flavor
+    cache = load_cache(root)
+
+    if (
+        not force
+        and out.is_file()
+        and cache.get("link_hash") == link_hash
+        and cache.get("binary") == str(out)
+    ):
+        CONFIG.BINARY_PATH = str(out)
+        return out
 
     if flavor == "msvc":
         cl_args = ["/nologo", "/O2", "/LD", "/EHsc", "/std:c++17"]
@@ -199,4 +216,7 @@ def build(project_root: Path | None = None) -> Path:
         raise RuntimeError(f"Build reported success but missing output: {out}")
 
     CONFIG.BINARY_PATH = str(out)
+    cache["link_hash"] = link_hash
+    cache["binary"] = str(out)
+    save_cache(root, cache)
     return out

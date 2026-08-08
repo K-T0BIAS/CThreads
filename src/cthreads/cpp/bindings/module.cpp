@@ -313,6 +313,12 @@ PYBIND11_MODULE(cthreads, m) {
         "Load the shared library produced by api.build() (BINARY_PATH)."
     );
 
+    m.def(
+        "unload_kernels",
+        []() { cthreads::kernels().close(); },
+        "Unload the kernel shared library (needed before force-rebuild on Windows)."
+    );
+
     py::class_<SpawnedKernel, std::unique_ptr<SpawnedKernel>>(m, "Thread")
         .def("start", &SpawnedKernel::start)
         .def("join", &SpawnedKernel::join,

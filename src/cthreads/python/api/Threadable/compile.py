@@ -1,14 +1,34 @@
 import inspect
 from pathlib import Path
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
 from ..pyTypes import hint_to_pytype
 from ..CONFIG import STORE, VERSION
 from ..Thread.compile.compile import translate_thread
 from ..kernel_meta import build_kernel_meta, emit_trampoline_cpp, emit_trampoline_decls
+from ..cache import source_fingerprint, write_if_changed
+
+_EXPORT_HPP = (
+    "#pragma once\n\n"
+    "#ifndef CTHREADS_API\n"
+    "#  if defined(_WIN32)\n"
+    '#    define CTHREADS_API extern "C" __declspec(dllexport)\n'
+    "#  else\n"
+    '#    define CTHREADS_API extern "C"\n'
+    "#  endif\n"
+    "#endif\n"
+)
 
 
-def compile_threadable(cls: type, methods: list) -> None:
+def compile_threadable(
+    cls: type,
+    methods: list,
+    force: bool = False,
+    cache: dict[str, Any] | None = None,
+) -> bool:
+    """
+    Generate Threadable C++. Returns True if any output file was rewritten.
+    """
     if not getattr(cls, "__threadable", False):
         raise TypeError(f"Class {cls.__name__} is not a Threadable class")
     if getattr(cls, "__threadable_version", "") != VERSION:
@@ -21,8 +41,27 @@ def compile_threadable(cls: type, methods: list) -> None:
     hpp_path = out_dir / f"{name}.hpp"
     cpp_path = out_dir / f"{name}.cpp"
 
-    # Register early so method signatures can #include / resolve this type.
     STORE[name] = str(hpp_path)
+
+    src_hash = source_fingerprint(cls, *methods)
+    units = (cache or {}).setdefault("units", {})
+    cached = units.get(name, {})
+    outputs_ok = hpp_path.is_file() and cpp_path.is_file()
+
+    thread_dir = src_file.parent / "__Thread__"
+    thread_dir.mkdir(parents=True, exist_ok=True)
+    export_path = thread_dir / "cthreads_export.hpp"
+
+    if (
+        not force
+        and outputs_ok
+        and cached.get("src_hash") == src_hash
+    ):
+        for fn in methods:
+            export = f"{name}_{fn.__name__}"
+            build_kernel_meta(fn, symbol=export, owner_name=name, owner_cls=cls)
+        write_if_changed(export_path, _EXPORT_HPP)
+        return False
 
     includes: list[str] = []
     fields: list[str] = []
@@ -42,7 +81,6 @@ def compile_threadable(cls: type, methods: list) -> None:
     for result in method_results:
         for line in result.sig_includes:
             if line and line not in seen_includes:
-                # Skip self-include of this class header.
                 if name in line and "__Threadable__" in line:
                     continue
                 seen_includes.add(line)
@@ -57,7 +95,6 @@ def compile_threadable(cls: type, methods: list) -> None:
     if method_decls:
         method_decls += "\n"
 
-    # Stable C exports for dispatch (member fns themselves can't be extern "C").
     c_wrappers_decl: list[str] = []
     c_wrappers_def: list[str] = []
     trampoline_defs: list[str] = []
@@ -85,20 +122,7 @@ def compile_threadable(cls: type, methods: list) -> None:
         trampoline_decls.append(emit_trampoline_decls(meta))
         trampoline_defs.append(emit_trampoline_cpp(meta, real_call=export))
 
-    # Shared export macro (same file free Threads write; keep in sync).
-    thread_dir = src_file.parent / "__Thread__"
-    thread_dir.mkdir(parents=True, exist_ok=True)
-    export_hpp = (
-        "#pragma once\n\n"
-        "#ifndef CTHREADS_API\n"
-        "#  if defined(_WIN32)\n"
-        "#    define CTHREADS_API extern \"C\" __declspec(dllexport)\n"
-        "#  else\n"
-        "#    define CTHREADS_API extern \"C\"\n"
-        "#  endif\n"
-        "#endif\n"
-    )
-    (thread_dir / "cthreads_export.hpp").write_text(export_hpp, encoding="utf-8")
+    write_if_changed(export_path, _EXPORT_HPP)
 
     hpp = "#pragma once\n\n"
     hpp += '#include "../__Thread__/cthreads_export.hpp"\n\n'
@@ -125,10 +149,17 @@ def compile_threadable(cls: type, methods: list) -> None:
     for block in trampoline_defs:
         cpp += "\n" + block
 
-    hpp_path.write_text(hpp, encoding="utf-8")
-    cpp_path.write_text(cpp, encoding="utf-8")
+    wrote_hpp = write_if_changed(hpp_path, hpp)
+    wrote_cpp = write_if_changed(cpp_path, cpp)
+    changed = wrote_hpp or wrote_cpp
+
+    units[name] = {
+        "src_hash": src_hash,
+        "hpp": str(hpp_path),
+        "cpp": str(cpp_path),
+    }
+    return changed
 
 
-# Old name used by earlier imports
 def compile(cls: type) -> None:
-    compile_threadable(cls, methods=[])
+    compile_threadable(cls, methods=[], force=True)

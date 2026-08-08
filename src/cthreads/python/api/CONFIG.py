@@ -22,16 +22,11 @@ class _Registry:
         self.threads: dict[str, object] = {}
 
     def register_threadable(self, cls: type) -> None:
-        name = cls.__name__
-        if name in self.threadables:
-            raise TypeError(f"Threadable {name!r} is already registered")
-        self.threadables[name] = cls
+        # Idempotent: re-decoration / prepare(force=True) overwrites.
+        self.threadables[cls.__name__] = cls
 
     def register_thread(self, fn) -> None:
-        key = fn.__qualname__
-        if key in self.threads:
-            raise TypeError(f"Thread {key!r} is already registered")
-        self.threads[key] = fn
+        self.threads[fn.__qualname__] = fn
 
     def clear(self) -> None:
         self.threadables.clear()

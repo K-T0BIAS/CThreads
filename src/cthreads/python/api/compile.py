@@ -1,44 +1,71 @@
 """
 Drain REGISTRY -> generate C++ -> fill STORE.
 
-Call explicitly (later: from the thread dispatch binding). Order:
+Call explicitly (or via prepare / api.thread). Order:
   1. all @Threadable classes (struct + @Thread methods)
   2. remaining free @Thread functions
 """
 
 import inspect
+from pathlib import Path
 
-from .CONFIG import REGISTRY, KERNELS
+from .CONFIG import REGISTRY, KERNELS, STORE
+from .cache import load_cache, save_cache
 
 
-def compile() -> None:
+def compile(force: bool = False) -> dict:
     """
-    Compiles all @Threadable classes and free @Thread functions that are registered in the _Registry into c++ code
+    Compiles all registered @Threadable / @Thread units into C++.
+
+    Args:
+        force: if True, ignore src hashes and regenerate all units.
 
     Returns:
-        None
-
-    NOTE: this function wil write its output into the __Threadable__ and __Thread__ directories whare code was generated.
+        dict with keys: root, cache, rewritten (list of unit names written)
     """
-    from .Thread.compile.compile import compile_free_thread # compile free @Thread functions
-    from .Threadable.compile import compile_threadable # compile @Threadable classes
+    from .Thread.compile.compile import compile_free_thread
+    from .Threadable.compile import compile_threadable
 
     KERNELS.clear()
-    claimed_methods: set[str] = set() # set of methods that have been claimed by a @Threadable class
+    STORE.clear()
+    claimed_methods: set[str] = set()
+    rewritten: list[str] = []
+    roots: set[Path] = set()
 
-    for cls in list(REGISTRY.threadables.values()): # iterate over all @Threadable classes
-        methods = [ # get all methods that are @Threaded (this is done sepperate for this ptr access validity)
+    # Infer project root early from any registered object.
+    sample = None
+    if REGISTRY.threadables:
+        sample = next(iter(REGISTRY.threadables.values()))
+    elif REGISTRY.threads:
+        sample = next(iter(REGISTRY.threads.values()))
+    if sample is None:
+        raise RuntimeError("Nothing registered to compile")
+
+    root = Path(inspect.getfile(sample)).resolve().parent
+    cache = load_cache(root)
+
+    for cls in list(REGISTRY.threadables.values()):
+        methods = [
             fn
             for _, fn in inspect.getmembers(cls, predicate=inspect.isfunction)
             if getattr(fn, "__threaded", False)
         ]
-        compile_threadable(cls, methods)
+        changed = compile_threadable(cls, methods, force=force, cache=cache)
+        if changed:
+            rewritten.append(cls.__name__)
         for fn in methods:
             claimed_methods.add(fn.__qualname__)
-    # iterate over all free @Thread functions
+        roots.add(Path(inspect.getfile(cls)).resolve().parent)
+
     for qualname, fn in list(REGISTRY.threads.items()):
         if qualname in claimed_methods:
             continue
-        compile_free_thread(fn)
+        changed = compile_free_thread(fn, force=force, cache=cache)
+        if changed:
+            rewritten.append(fn.__name__)
+        roots.add(Path(inspect.getfile(fn)).resolve().parent)
 
-    REGISTRY.clear() # clear the registry to prevent duplicate compilation
+    # Keep REGISTRY so prepare(force=True) / second compile() still sees units.
+    cache["units"] = cache.get("units", {})
+    save_cache(root, cache)
+    return {"root": root, "cache": cache, "rewritten": rewritten}
