@@ -1,4 +1,8 @@
 """
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
 Pack / unpack kernel args using the same TypeSchema as trampoline accessors.
 
 Params and returns share this path so list[Threadable], nested Threadables,

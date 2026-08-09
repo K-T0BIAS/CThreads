@@ -1,24 +1,28 @@
 """
-Python ``math`` / ``cthreads.math`` → C++ lowering tables.
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
 
-``MATHOPS``: stdlib ``math.*`` → ``std::*`` + ``<cmath>`` (hasattr-filtered).
-``CTHREADS_MATHOPS``: ``cthreads.math.*`` (module ``__cthreads_internal__``) →
-``cthreads::math::*`` + ``math/*.hpp``.
+Python `math` / `cthreads.math` -> C++ lowering tables.
+
+`MATHOPS`: stdlib `math.*` -> `std::*` + `<cmath>` (hasattr-filtered).
+`CTHREADS_MATHOPS`: `cthreads.math.*` (module `__cthreads_internal__`) ->
+`cthreads::math::*` + `math/*.hpp`.
 """
-
-from __future__ import annotations
 
 import math
 from typing import NamedTuple
 
+# defines the include for the cmath library
 CMATH_INCLUDE = "#include <cmath>\n"
+# defines the include for the numbers library
 NUMBERS_INCLUDE = "#include <numbers>\n"
 
 
 class MathOp(NamedTuple):
     cpp_func: str
     arity: int
-    # None → use CMATH_INCLUDE; else e.g. 'math/abs.hpp'
+    # None -> use CMATH_INCLUDE; else e.g. 'math/abs.hpp'
     cpp_include: str | None = None
 
 
@@ -66,6 +70,7 @@ _ALL_MATHOPS: dict[str, MathOp] = {
     "isnan": MathOp("std::isnan", 1),
 }
 
+# filter the math ops based on the math module in the users python interpreter
 MATHOPS: dict[str, MathOp] = {
     name: op for name, op in _ALL_MATHOPS.items() if hasattr(math, name)
 }
@@ -77,11 +82,14 @@ _ALL_MATHCONSTS: dict[str, str] = {
     "tau": "std::numbers::pi * 2.0",
 }
 
+# filter the math constants based on the math module in the users python interpreter
 MATHCONSTS: dict[str, str] = {
     name: expr for name, expr in _ALL_MATHCONSTS.items() if hasattr(math, name)
 }
 
-# from cthreads import math; math.abs / clamp / …
+# from cthreads import math; math.abs / clamp / ...
+# math implementations comming from the cthreads.math module 
+# (defined in the c++ math library and bound to the cthreads namespace via pybind11)
 CTHREADS_MATHOPS: dict[str, MathOp] = {
     "abs": MathOp("cthreads::math::abs", 1, "math/abs.hpp"),
     "min": MathOp("cthreads::math::min", 2, "math/clamps.hpp"),

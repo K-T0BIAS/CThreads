@@ -1,4 +1,10 @@
-"""Math-stdlib lowering helpers for @Thread codegen."""
+"""
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
+Math-stdlib lowering helpers for @Thread codegen.
+"""
 
 from .is_math import is_math, resolve_math_call, resolve_math_const
 from .mathOps import (

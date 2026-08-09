@@ -1,4 +1,8 @@
 """
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
 Kernel metadata + trampoline emission for dispatch.
 
 Params and returns share one recursive TypeSchema so pack / writeback /
@@ -360,12 +364,12 @@ def _emit_prim_accessors(
     lines: list[str],
     *,
     symbol: str,
-    struct: str,
+    struct: str, # unused
     prefix: str,
     expr: str,
     kind: str,
     extra_params: str,
-    extra_args_use: str,
+    extra_args_use: str, # unused
 ) -> None:
     """extra_params like ', size_t i0' or ', const char* k0'."""
     cpp_t = _cpp_prim(kind)

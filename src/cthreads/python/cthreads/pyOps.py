@@ -1,4 +1,8 @@
 """
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
 Operator tables and builtin-call whitelist for AST lowering.
 
 In the AST, `a * b` is not the character `*` — it is:
@@ -7,7 +11,7 @@ In the AST, `a * b` is not the character `*` — it is:
 
 When we emit C++, we look up `type(node.op)` in these maps.
 
-Builtin calls (``range``, ``len``, …) are matched by bare name — same style as
+Builtin calls (`range`, `len`, ...) are matched by bare name — same style as
 ``for i in range(n)`` — not via pybind helpers.
 """
 
@@ -20,7 +24,7 @@ BUILTINS: frozenset[str] = frozenset({"range", "len"})
 
 
 def is_builtin_call(node: ast.AST, name: str) -> bool:
-    """True for ``name(...)`` when ``name`` is a whitelisted builtin."""
+    """True for `name(...)` when `name` is a whitelisted builtin."""
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)

@@ -1,3 +1,9 @@
+"""
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+"""
+
 from typing import Any, get_args, get_origin
 
 TYPE_WHITELIST = [
@@ -11,6 +17,9 @@ TYPE_WHITELIST = [
 ]
 
 def is_internal_cthreads_type(item: Any) -> bool:
+    """
+    Check if the type is an internal CThreads type.
+    """
     return isinstance(item, type) and getattr(item, "__cthreads_internal__", False)
 
 def is_threadable(item: Any) -> bool:

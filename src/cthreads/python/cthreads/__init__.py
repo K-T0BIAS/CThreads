@@ -1,4 +1,8 @@
 """
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
 cthreads — Python frontend + native runtime.
 
 Public surface:
@@ -43,19 +47,19 @@ from .prepare import prepare, thread
 from .job import Job, wrap_job
 from . import CONFIG
 
-# --- _ext once; re-export submodules (same pattern for sync, math, …) --------
+# --- _ext once; re-export submodules (same pattern for sync, math, ...) --------
 try:
-    from . import _ext as _ext
+    from . import _ext as _ext # try getting the extension module (c++ code)
 except ImportError:
     _ext = None  # type: ignore[assignment]
 
 if _ext is not None:
-    sync = _ext.sync
+    sync = _ext.sync # get the sync module
     math = getattr(_ext, "math", None)  # older wheels may lack math
-    load_kernels = _ext.load_kernels
-    unload_kernels = _ext.unload_kernels
-    host_os = _ext.host_os
-    kernel_path = getattr(_ext, "kernel_path", lambda: None)
+    load_kernels = _ext.load_kernels # get the load_kernels function
+    unload_kernels = _ext.unload_kernels # get the unload_kernels function
+    host_os = _ext.host_os # get the host_os function
+    kernel_path = getattr(_ext, "kernel_path", lambda: None) # get the kernel_path function
 
     def spawn(fn, *args: Any, **kwargs: Any) -> Job:
         """Low-level: bind args and return an awaitable Job (no prepare/compile)."""

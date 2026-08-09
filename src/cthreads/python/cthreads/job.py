@@ -1,5 +1,9 @@
 """
-Awaitable Job wrapper around ``cthreads._ext.Job``.
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
+Awaitable Job wrapper around `cthreads._ext.Job`.
 
 Public usage::
 
@@ -19,7 +23,7 @@ from typing import Any, Iterator
 
 
 class Job:
-    """Python-facing Job: delegates to the native handle, adds ``await``."""
+    """Python-facing Job: delegates to the native handle, adds `await`."""
 
     __slots__ = ("_raw", "_started")
 
@@ -61,7 +65,7 @@ class Job:
         return self.result()
 
     def __await__(self) -> Iterator[Any]:
-        """``await job`` → auto-start, wait off the event loop, return result."""
+        """`await job` -> auto-start, wait off the event loop, return result."""
         return self._await_result().__await__()
 
     def __repr__(self) -> str:
@@ -72,7 +76,7 @@ class Job:
 
 
 def wrap_job(raw: Any) -> Job:
-    """Wrap a native ``_ext.Job`` (or return ``raw`` if already wrapped)."""
+    """Wrap a native `_ext.Job` (or return `raw` if already wrapped)."""
     if isinstance(raw, Job):
         return raw
     return Job(raw)

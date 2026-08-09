@@ -1,3 +1,9 @@
+"""
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+"""
+
 VERSION: str = "0.1.0"
 
 # Compiled outputs: name -> path to generated .hpp

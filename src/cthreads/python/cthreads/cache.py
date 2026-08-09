@@ -1,4 +1,8 @@
 """
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
 Content-hash cache + write-if-changed helpers for smart compile/build.
 """
 
@@ -27,6 +31,9 @@ _GITIGNORE_PATTERNS = (
 
 
 def sha256_text(*parts: str) -> str:
+    """
+    Hash the text parts.
+    """
     h = hashlib.sha256()
     for part in parts:
         h.update(part.encode("utf-8"))
@@ -39,7 +46,7 @@ def source_fingerprint(*objs: Any) -> str:
     chunks = [VERSION]
     for obj in objs:
         try:
-            chunks.append(inspect.getsource(obj))
+            chunks.append(inspect.getsource(obj)) # collect the src code of the object
         except (OSError, TypeError):
             chunks.append(repr(obj))
         chunks.append(getattr(obj, "__qualname__", getattr(obj, "__name__", "")))

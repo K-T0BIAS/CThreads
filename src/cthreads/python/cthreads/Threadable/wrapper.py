@@ -1,3 +1,9 @@
+"""
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+"""
+
 import inspect
 from ..CONFIG import VERSION, REGISTRY
 from .lib import is_threadable
@@ -41,6 +47,7 @@ def Threadable(cls):
                 f"Threadable class {cls.__name__} has invalid type {hint}"
             ) from e
 
+    # ensure all methods are @Thread wrapped
     for name, func in inspect.getmembers(cls, predicate=inspect.isfunction):
         if not getattr(func, "__threaded", False):
             # plain methods: still require threadable-safe annotations if present
@@ -65,5 +72,5 @@ def Threadable(cls):
                     f"Threadable method {name} has invalid type {hint}"
                 ) from e
 
-    REGISTRY.register_threadable(cls)
-    return cls
+    REGISTRY.register_threadable(cls) # register the class in the REGISTRY
+    return cls # return the class

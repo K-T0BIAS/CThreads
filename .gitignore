@@ -41,4 +41,4 @@ src/cthreads/cpp/build/
 src/cthreads/cpp/src/
 
 #temp ignores
-docs/demos/
+docs/

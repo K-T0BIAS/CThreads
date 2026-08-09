@@ -1,4 +1,8 @@
 """
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
+
 Compile generated C++ sources into one shared library using the user's compiler.
 
 Requires `api.compile()` to have populated STORE first.
@@ -18,14 +22,17 @@ BINARY_STEM = "cthreads_kernels"
 
 
 def _locate_vs_cl() -> str | None:
-    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-    vswhere = Path(pf86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
-    if not vswhere.is_file():
-        return None
+    """
+    Locate the Visual Studio CL compiler.
+    """
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)") # get the path to the Program Files (x86) directory
+    vswhere = Path(pf86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe" # get the path to the vswhere.exe file
+    if not vswhere.is_file(): # check if the vswhere.exe file exists
+        return None # return None if it doesn't exist
 
-    probe = subprocess.run(
+    probe = subprocess.run( # run the vswhere.exe file to find the CL compiler
         [
-            str(vswhere),
+            str(vswhere), # the path to the vswhere.exe file
             "-latest",
             "-products",
             "*",
@@ -121,7 +128,7 @@ def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
         sources.append(cpp_path)
         include_dirs.add(hpp_path.parent)
 
-    # Bundled runtime headers (sync/, future math/, …) live under cpp/headers.
+    # Bundled runtime headers (sync/, future math/, ...) live under cpp/headers.
     # Path: .../python/cthreads/build.py -> .../cpp/headers
     runtime_headers = (
         Path(__file__).resolve().parent.parent.parent / "cpp" / "headers"
