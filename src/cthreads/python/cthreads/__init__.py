@@ -5,7 +5,20 @@ Public surface:
   @cthreads.Threadable / @cthreads.Thread
   cthreads.compile / build / prepare / thread
   cthreads.Job (native thread handle)
-  cthreads.sync (Lock, Event, RWLock)
+  cthreads.sync / cthreads.math / …  (pybind submodules on _ext)
+
+Native API pattern (sync, math, future libs)
+--------------------------------------------
+Pybind defines submodules on ``cthreads._ext`` (``def_submodule("sync")``, …).
+We import ``_ext`` **once** and re-export each submodule on ``cthreads``:
+
+    from cthreads import sync, math
+    sync.Lock()
+    math.abs(-1.0)
+
+Do **not** ``sys.modules["cthreads.sync"] = …`` or add shadow ``sync.py`` /
+``math.py`` wrappers — that can double-init the extension and break pybind
+types (``Lock`` already defined).
 """
 
 from __future__ import annotations
@@ -19,21 +32,32 @@ from .build import build
 from .prepare import prepare, thread
 from . import CONFIG
 
-from ._ext import (
-    Job,
-    sync,
-    load_kernels,
-    unload_kernels,
-    host_os,
-)
-
+# --- _ext once; re-export submodules (same pattern for sync, math, …) --------
 try:
-    from ._ext import kernel_path
-except ImportError:  # older _ext wheel before marshal refactor
+    from . import _ext as _ext
+except ImportError:
+    _ext = None  # type: ignore[assignment]
+
+if _ext is not None:
+    Job = _ext.Job
+    sync = _ext.sync
+    math = getattr(_ext, "math", None)  # older wheels may lack math
+    load_kernels = _ext.load_kernels
+    unload_kernels = _ext.unload_kernels
+    host_os = _ext.host_os
+    spawn = _ext.thread
+    kernel_path = getattr(_ext, "kernel_path", lambda: None)
+else:
+    Job = None  # type: ignore[assignment,misc]
+    sync = None  # type: ignore[assignment,misc]
+    math = None  # type: ignore[assignment]
+    load_kernels = None  # type: ignore[assignment,misc]
+    unload_kernels = None  # type: ignore[assignment,misc]
+    host_os = None  # type: ignore[assignment,misc]
+    spawn = None  # type: ignore[assignment,misc]
+
     def kernel_path():
         return None
-
-from ._ext import thread as spawn  # low-level: no compile/build
 
 __all__ = [
     "Threadable",
@@ -45,6 +69,7 @@ __all__ = [
     "spawn",
     "Job",
     "sync",
+    "math",
     "load_kernels",
     "unload_kernels",
     "kernel_path",

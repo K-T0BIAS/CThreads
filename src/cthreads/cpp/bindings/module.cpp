@@ -2,6 +2,9 @@
 #include <pybind11/stl.h>
 
 #include "../headers/dispatch.hpp"
+#include "../headers/math/abs.hpp"
+#include "../headers/math/clamps.hpp"
+#include "../headers/math/random.hpp"
 #include "../headers/pyThread.hpp"
 #include "../headers/sync/pyEvent.hpp"
 #include "../headers/sync/pyLock.hpp"
@@ -338,4 +341,59 @@ PYBIND11_MODULE(_ext, m) {
              py::call_guard<py::gil_scoped_release>());
 
     rwlock.attr("__cthreads_internal__") = true;
+
+    // cthreads.math — helpers not in stdlib math (abs/min/max/clamp/RNG).
+    // Mark the *module* with __cthreads_internal__ (pybind bound functions are
+    // builtins and cannot carry arbitrary attrs). Call lowering checks the
+    // module / __module__ and emits cthreads::math::* + #include "math/*.hpp".
+    py::module_ math = m.def_submodule("math", "cthreads math helpers for @Thread");
+    math.attr("__cthreads_internal__") = true;
+
+    math.def(
+        "abs",
+        [](double x) { return cthreads::math::abs(x); },
+        py::arg("x")
+    );
+
+    math.def(
+        "min",
+        [](double a, double b) { return cthreads::math::min(a, b); },
+        py::arg("a"),
+        py::arg("b")
+    );
+
+    math.def(
+        "max",
+        [](double a, double b) { return cthreads::math::max(a, b); },
+        py::arg("a"),
+        py::arg("b")
+    );
+
+    math.def(
+        "clamp",
+        [](double value, double lo, double hi) {
+            return cthreads::math::clamp(value, lo, hi);
+        },
+        py::arg("value"),
+        py::arg("lo"),
+        py::arg("hi")
+    );
+
+    math.def("random", &cthreads::math::random);
+
+    math.def(
+        "uniform",
+        &cthreads::math::uniform,
+        py::arg("lo"),
+        py::arg("hi")
+    );
+
+    math.def(
+        "randint",
+        &cthreads::math::randint,
+        py::arg("lo"),
+        py::arg("hi")
+    );
+
+    math.def("seed", &cthreads::math::seed, py::arg("s"));
 }

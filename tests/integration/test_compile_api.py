@@ -78,7 +78,10 @@ def test_compile_force_still_succeeds(tmp_module):
 @pytest.mark.integration
 def test_prepare_build_and_thread_job(tmp_module):
     """Needs a C++ compiler + built cthreads._ext."""
-    pytest.importorskip("cthreads._ext")
+    try:
+        import cthreads._ext  # noqa: F401
+    except ImportError as e:
+        pytest.skip(f"cthreads._ext unavailable: {e}")
     from cthreads import Job, prepare, thread, unload_kernels
 
     mod = tmp_module(

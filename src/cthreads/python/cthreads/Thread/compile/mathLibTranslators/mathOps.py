@@ -1,15 +1,9 @@
 """
-Python ``math`` → C++ ``<cmath>`` lowering table.
+Python ``math`` / ``cthreads.math`` → C++ lowering tables.
 
-``MATHOPS`` is filtered with ``hasattr(math, name)`` so entries that only
-exist on newer CPython (e.g. ``math.fma`` on 3.13+) are omitted on older
-interpreters. Arity is the std::-compatible positional count (exact).
-
-Notes:
-  - ``math.log(x, base)`` is rejected at the call site (arity 1 → ``std::log``).
-  - ``math.hypot(*coords)`` is limited to 2 args (``std::hypot``).
-  - ``math.gamma`` → ``std::tgamma``.
-  - Types are not stored; numeric exprs lower to C++ overloads.
+``MATHOPS``: stdlib ``math.*`` → ``std::*`` + ``<cmath>`` (hasattr-filtered).
+``CTHREADS_MATHOPS``: ``cthreads.math.*`` (module ``__cthreads_internal__``) →
+``cthreads::math::*`` + ``math/*.hpp``.
 """
 
 from __future__ import annotations
@@ -24,9 +18,11 @@ NUMBERS_INCLUDE = "#include <numbers>\n"
 class MathOp(NamedTuple):
     cpp_func: str
     arity: int
+    # None → use CMATH_INCLUDE; else e.g. 'math/abs.hpp'
+    cpp_include: str | None = None
 
 
-# Full support set; filtered below for the running interpreter.
+# Full stdlib support set; filtered below for the running interpreter.
 _ALL_MATHOPS: dict[str, MathOp] = {
     "sqrt": MathOp("std::sqrt", 1),
     "cbrt": MathOp("std::cbrt", 1),
@@ -83,4 +79,16 @@ _ALL_MATHCONSTS: dict[str, str] = {
 
 MATHCONSTS: dict[str, str] = {
     name: expr for name, expr in _ALL_MATHCONSTS.items() if hasattr(math, name)
+}
+
+# from cthreads import math; math.abs / clamp / …
+CTHREADS_MATHOPS: dict[str, MathOp] = {
+    "abs": MathOp("cthreads::math::abs", 1, "math/abs.hpp"),
+    "min": MathOp("cthreads::math::min", 2, "math/clamps.hpp"),
+    "max": MathOp("cthreads::math::max", 2, "math/clamps.hpp"),
+    "clamp": MathOp("cthreads::math::clamp", 3, "math/clamps.hpp"),
+    "random": MathOp("cthreads::math::random", 0, "math/random.hpp"),
+    "uniform": MathOp("cthreads::math::uniform", 2, "math/random.hpp"),
+    "randint": MathOp("cthreads::math::randint", 2, "math/random.hpp"),
+    "seed": MathOp("cthreads::math::seed", 1, "math/random.hpp"),
 }

@@ -65,10 +65,14 @@ def test_lib_caches_single_cdll(monkeypatch):
         def kernel_path():
             return r"C:\fake\kernels.dll"
 
+    import sys
+
     import cthreads
 
     monkeypatch.setattr(marshal.ctypes, "CDLL", FakeDLL)
-    monkeypatch.setattr(cthreads, "_ext", FakeExt)
+    monkeypatch.setitem(sys.modules, "cthreads._ext", FakeExt)
+    if hasattr(cthreads, "_ext"):
+        monkeypatch.setattr(cthreads, "_ext", FakeExt)
     monkeypatch.setattr(marshal, "_cached_lib", None)
     monkeypatch.setattr(marshal, "_cached_path", None)
 

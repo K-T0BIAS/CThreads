@@ -35,8 +35,9 @@ _cached_path: str | None = None
 
 def _lib():
     global _cached_lib, _cached_path
-    from cthreads import _ext
+    import importlib
 
+    _ext = importlib.import_module("cthreads._ext")
     path = _ext.kernel_path()
     if not path:
         raise RuntimeError("cthreads.marshal: kernel library not loaded")
