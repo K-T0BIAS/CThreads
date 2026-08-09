@@ -18,7 +18,7 @@ BINOPS: dict[type, str] = {
     ast.Div: "/",          # Python 3 `/` is true division -> usually C++ `/` on doubles
     ast.FloorDiv: "/",     # `//` — only valid for ints in our subset; revisit later
     ast.Mod: "%",
-    ast.Pow: "",           # no C++ `**`; use std::pow later or reject
+    # ast.Pow handled specially in binOp / augAssign → std::pow(...)
     ast.LShift: "<<",
     ast.RShift: ">>",
     ast.BitOr: "|",

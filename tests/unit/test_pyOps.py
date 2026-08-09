@@ -9,7 +9,6 @@ def test_binops_cover_common_ops():
     assert BINOPS[ast.Add] == "+"
     assert BINOPS[ast.Mult] == "*"
     assert BINOPS[ast.Mod] == "%"
-    assert BINOPS[ast.Pow] == ""  # intentionally unsupported token
 
 
 def test_unary_compare_bool_ops():

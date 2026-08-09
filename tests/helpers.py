@@ -15,6 +15,7 @@ def make_ctx(
     symbols: dict[str, Any] | None = None,
     owner_name: str | None = None,
     hints: dict[str, Any] | None = None,
+    globals_extra: dict[str, Any] | None = None,
 ) -> TranslateContext:
     class _DummyFn:
         __name__ = func_name
@@ -25,6 +26,9 @@ def make_ctx(
             "list": list,
             "str": str,
         }
+
+    if globals_extra:
+        _DummyFn.__globals__ = {**_DummyFn.__globals__, **globals_extra}
 
     return TranslateContext(
         fn=_DummyFn(),

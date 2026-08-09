@@ -47,12 +47,31 @@ def test_attribute_self_and_plain():
     assert attribute.translate(parse_expr("p.velocity"), ctx) == "p.velocity"
 
 
-def test_binop_and_unsupported():
+def test_binop_and_pow():
     ctx = make_ctx(symbols={"a": PyInt(), "b": PyInt()})
     assert binOp.translate(parse_expr("a + b"), ctx) == "(a + b)"
     assert binOp.translate(parse_expr("a * b"), ctx) == "(a * b)"
-    with pytest.raises(TypeError, match="unsupported binary"):
-        binOp.translate(parse_expr("a ** b"), ctx)
+    assert binOp.translate(parse_expr("a ** b"), ctx) == "std::pow(a, b)"
+    assert any("cmath" in line for line in ctx.body_includes)
+
+
+def test_math_call_and_const():
+    import math
+
+    from cthreads.Thread.compile.AstTranslators import call
+
+    ctx = make_ctx(
+        symbols={"x": PyFloat(), "y": PyFloat()},
+        globals_extra={"math": math, "sqrt": math.sqrt},
+    )
+    assert call.translate(parse_expr("math.sqrt(x)"), ctx) == "std::sqrt(x)"
+    assert call.translate(parse_expr("sqrt(x)"), ctx) == "std::sqrt(x)"
+    assert call.translate(parse_expr("math.atan2(y, x)"), ctx) == "std::atan2(y, x)"
+    assert attribute.translate(parse_expr("math.pi"), ctx) == "std::numbers::pi"
+    with pytest.raises(TypeError, match="unsupported call"):
+        call.translate(parse_expr("math.pow(x)"), ctx)
+    with pytest.raises(TypeError, match="unsupported call"):
+        call.translate(parse_expr("unknown(x)"), ctx)
 
 
 def test_unaryop():

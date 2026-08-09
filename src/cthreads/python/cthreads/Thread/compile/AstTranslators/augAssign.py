@@ -19,7 +19,16 @@ from .context import TranslateContext
 
 
 def translate(node: ast.AugAssign, ctx: TranslateContext) -> list[str]:
+    from ..lib import add_include
+    from ..mathLibTranslators import CMATH_INCLUDE
     from .translate import translate_expr
+
+    target = translate_expr(node.target, ctx)
+    value = translate_expr(node.value, ctx)
+
+    if isinstance(node.op, ast.Pow):
+        add_include(ctx.body_includes, ctx.seen_body, CMATH_INCLUDE)
+        return [f"    {target} = std::pow({target}, {value});"]
 
     op = BINOPS.get(type(node.op))
     if not op:
@@ -28,6 +37,4 @@ def translate(node: ast.AugAssign, ctx: TranslateContext) -> list[str]:
             f"unsupported aug-assign operator {type(node.op).__name__}"
         )
 
-    target = translate_expr(node.target, ctx)
-    value = translate_expr(node.value, ctx)
     return [f"    {target} {op}= {value};"]

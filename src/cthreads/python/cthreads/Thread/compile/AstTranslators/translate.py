@@ -42,6 +42,7 @@ from . import (
     binOp,
     boolOp,
     breakStmt,
+    call,
     compare,
     constant,
     continueStmt,
@@ -67,6 +68,7 @@ EXPR_TRANSLATORS: dict[type, ExprTranslator] = {
     ast.UnaryOp: unaryOp.translate,
     ast.Compare: compare.translate,
     ast.BoolOp: boolOp.translate,
+    ast.Call: call.translate,
 }
 
 STMT_TRANSLATORS: dict[type, StmtTranslator] = {
