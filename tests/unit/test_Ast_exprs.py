@@ -74,6 +74,18 @@ def test_math_call_and_const():
         call.translate(parse_expr("unknown(x)"), ctx)
 
 
+def test_builtin_len_call():
+    from cthreads.pyTypes import PyList
+    from cthreads.Thread.compile.AstTranslators import call
+
+    ctx = make_ctx(symbols={"xs": PyList(PyInt()), "n": PyInt()})
+    assert call.translate(parse_expr("len(xs)"), ctx) == "(xs).size()"
+    with pytest.raises(TypeError, match="len\\(\\) expects 1 arg"):
+        call.translate(parse_expr("len()"), ctx)
+    with pytest.raises(TypeError, match="len\\(\\) expects 1 arg"):
+        call.translate(parse_expr("len(xs, n)"), ctx)
+
+
 def test_unaryop():
     ctx = make_ctx(symbols={"a": PyInt(), "f": PyFloat()})
     assert unaryOp.translate(parse_expr("-a"), ctx) == "(-a)"

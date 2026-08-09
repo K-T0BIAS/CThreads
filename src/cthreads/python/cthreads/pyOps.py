@@ -1,14 +1,33 @@
 """
-Operator tables for future expression lowering (BinOp / UnaryOp / AugAssign).
+Operator tables and builtin-call whitelist for AST lowering.
 
 In the AST, `a * b` is not the character `*` — it is:
 
     BinOp(left=..., op=ast.Mult(), right=...)
 
 When we emit C++, we look up `type(node.op)` in these maps.
+
+Builtin calls (``range``, ``len``, …) are matched by bare name — same style as
+``for i in range(n)`` — not via pybind helpers.
 """
 
+from __future__ import annotations
+
 import ast
+
+# Bare-name builtins lowered in codegen (not cthreads.* / math.* modules).
+BUILTINS: frozenset[str] = frozenset({"range", "len"})
+
+
+def is_builtin_call(node: ast.AST, name: str) -> bool:
+    """True for ``name(...)`` when ``name`` is a whitelisted builtin."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == name
+        and name in BUILTINS
+    )
+
 
 # Binary operators: used by ast.BinOp and as the op inside ast.AugAssign
 BINOPS: dict[type, str] = {

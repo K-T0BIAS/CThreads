@@ -23,6 +23,7 @@ Two supported shapes:
 
 import ast
 
+from ....pyOps import is_builtin_call
 from ....pyTypes import PyInt, PyList
 from .context import TranslateContext
 
@@ -52,11 +53,8 @@ def translate(node: ast.For, ctx: TranslateContext) -> list[str]:
 
     # --- range(n) / range(a, b) / range(a, b, s) ---
     it = node.iter
-    if (
-        isinstance(it, ast.Call)
-        and isinstance(it.func, ast.Name)
-        and it.func.id == "range"
-    ):
+    if is_builtin_call(it, "range"):
+        assert isinstance(it, ast.Call)
         if it.keywords:
             raise TypeError(
                 f"Thread function {ctx.func_name}: "
