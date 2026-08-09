@@ -13,6 +13,10 @@ Jobs::
     result = await job                 # preferred async path (auto-starts)
     job.start(); job.join(); job.result()   # sync still works
 
+``thread()`` spawns on already-loaded kernels (no per-call unload). First use
+runs cache-checked ``prepare`` + ``load_kernels``. Call ``unload_kernels()``
+yourself before a force-rebuild, or at process exit.
+
 Native API pattern (sync, math, future libs)
 --------------------------------------------
 Pybind defines submodules on ``cthreads._ext`` (``def_submodule("sync")``, …).
