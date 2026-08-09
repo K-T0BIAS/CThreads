@@ -9,11 +9,11 @@ Params and returns share this path so list[Threadable], nested Threadables,
 list[base], and dict[str|int, T] all round-trip the same way.
 
 Thread safety: every entry point takes an explicit pack pointer. There is no
-process-global pack slot — concurrent Jobs may pack/writeback/unpack in
+process-global pack slot - concurrent Jobs may pack/writeback/unpack in
 parallel (ctypes releases the GIL) without clobbering each other.
 
-The kernel CDLL is cached once per path. Calls go through ``_call``, which
-binds via CFUNCTYPE and never mutates shared ``fn.argtypes`` / ``fn.restype``
+The kernel CDLL is cached once per path. Calls go through `_call`, which
+binds via CFUNCTYPE and never mutates shared `fn.argtypes` / `fn.restype`
 (those races + repeated LoadLibrary were a Windows hard-hang under Jobs).
 """
 

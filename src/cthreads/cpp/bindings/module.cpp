@@ -23,7 +23,24 @@ namespace py = pybind11;
 
 namespace {
 
+/**
+Defines the c++ object behind a python Job object.
+It holds the compiled cthreads threaded function (from @Thread) and 
+the place to stash the result value(s)
+
+Attributes:
+- thr: std::unique_ptr<cthreads::CThread> = pointer to the compiled cthreads threaded function
+- result: std::shared_ptr<py::object> = pointer to the place to stash the result value(s)
+
+Methods:
+- start(): void = calls start() on the compiled cthreads threaded function
+- join(): void = calls join() on the compiled cthreads threaded function
+- wait(): void = calls wait() on the compiled cthreads threaded function
+- done(): bool = calls done() on the compiled cthreads threaded function
+- get_result(): py::object = returns the result value(s) (if no result, this returns py::none)
+*/
 struct SpawnedKernel {
+
     std::unique_ptr<cthreads::CThread> thr;
     std::shared_ptr<py::object> result;
 
@@ -39,16 +56,37 @@ struct SpawnedKernel {
     }
 };
 
+
+/**
+Converts the python side args for a @Thread function into the struct FnName_args.
+It creates a perfect copy that can be passes in the generated trapoline fn (FnName__call)
+so that the GIL stays released during the function call.
+
+Args:
+- symbol: the name of the kernel function (SpawnedKernel::thr)
+- params: compile time param metadata from __kernel_meta__
+- values: the actual python values (ordered to match params)
+- pack: the pointer to the pack slot in the kernel library
+- types: layout info for @Threadables or nested containers (if present)
+- schemas: ^^^^
+
+Returns:
+- void = fills the pack slot with the struct FnName_args (inplace)
+*/
 void fill_pack_from_values(
-    const std::string& symbol,
-    const py::list& params,
-    const py::list& values,
-    void* pack,
-    py::dict types,
-    py::dict schemas
+    const std::string& symbol, // the name of the kernel function (SpawnedKernel::thr)
+    const py::list& params,    // compile time param metadata from __kernel_meta__
+    const py::list& values,    // the actual python values (ordered to match params)
+    void* pack,                // the pointer to the pack slot in the kernel library
+    py::dict types,            // layout info for @Threadables or nested containers (if present)
+    py::dict schemas           // ^^^^
 ) {
+    // get the marshall module
     py::module_ marshal = py::module_::import("cthreads.marshal");
-    marshal.attr("pack_params")(
+    // call the pack_params function from the marshall module
+    // this function walks all the trampoline setters for each param and calls them with the arg values
+    // when done it holds a copy of the py object in the form of struct FnName_args 
+    marshal.attr("pack_params")( 
         symbol,
         params,
         values,
@@ -58,6 +96,20 @@ void fill_pack_from_values(
     );
 }
 
+/**
+Writes back the result value(s) from the pack slot to the python side.
+
+This function helps update mutable python objects such that the c++ state is mirrored 
+in python. It runs for (@Threadable, list, dict) not for function local data
+
+Args:
+- symbol: the name of the kernel function (SpawnedKernel::thr)
+- params: compile time param metadata from __kernel_meta__
+- values: the actual python values (ordered to match params)
+- pack: the pointer to the pack slot in the kernel library
+- types: layout info for @Threadables or nested containers (if present)
+- schemas: ^^^^
+*/
 void writeback_params(
     const std::string& symbol,
     const py::list& params,
@@ -77,6 +129,13 @@ void writeback_params(
     );
 }
 
+/**
+Reads the return data and converts it to python object(s)
+
+Args:
+- meta: the compile time metadata from __kernel_meta__
+- pack: the pointer to the pack (struct FnName_args)
+*/
 py::object read_return(py::dict meta, void* pack) {
     py::module_ marshal = py::module_::import("cthreads.marshal");
     return marshal.attr("unpack_return")(
@@ -85,23 +144,38 @@ py::object read_return(py::dict meta, void* pack) {
     );
 }
 
+
+/**
+Collects args from the python side and prepares the pacck struct.
+Then builds the job object for the @Thread fn and merges it with the param pack.
+Finally threads the job and builds a SpawnedKernel object to hold the job and relevant data
+
+Args:
+- meta: the compile time metadata from __kernel_meta__
+- ordered_values: the actual python values (ordered to match params)
+
+Returns:
+- std::unique_ptr<SpawnedKernel> = the spawned kernel object
+*/
 std::unique_ptr<SpawnedKernel> spawn_from_meta(
     py::dict meta,
     py::list ordered_values
 ) {
+    // ensure that the kernel library is loaded 
     if (!cthreads::kernels().loaded()) {
         throw std::runtime_error(
-            "cthreads.thread: kernel library not loaded — "
+            "cthreads.thread: kernel library not loaded. "
             "call cthreads.load_kernels(BINARY_PATH) after build()"
         );
     }
 
-    const std::string symbol = meta["symbol"].cast<std::string>();
-    const std::string call_sym = meta["call_symbol"].cast<std::string>();
-    const std::string new_sym = meta["args_new_symbol"].cast<std::string>();
-    const std::string free_sym = meta["args_free_symbol"].cast<std::string>();
-    py::list params = meta["params"].cast<py::list>();
+    const std::string symbol = meta["symbol"].cast<std::string>(); // the name of the kernel function (SpawnedKernel::thr)
+    const std::string call_sym = meta["call_symbol"].cast<std::string>(); // the name of the call function (FnName__call)
+    const std::string new_sym = meta["args_new_symbol"].cast<std::string>(); // the name of the new function (FnName__args_new)
+    const std::string free_sym = meta["args_free_symbol"].cast<std::string>(); // the name of the free function (FnName__args_free)
+    py::list params = meta["params"].cast<py::list>(); // the compile time param metadata from __kernel_meta__
 
+    // ensure the num of parameters actually matches the num of values given by the user
     if (ordered_values.size() != params.size()) {
         throw py::type_error(
             "cthreads.thread: expected " + std::to_string(params.size()) +
@@ -110,6 +184,7 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
         );
     }
 
+    // verify that the call function symbol (FnName__call) is present in the kernel library
     if (cthreads::kernels().sym(call_sym.c_str()) == nullptr) {
         throw std::runtime_error(
             "cthreads.thread: no compiled kernel trampoline '" + call_sym +
@@ -121,8 +196,10 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
     using FreeFn = void (*)(void*);
     using CallFn = void (*)(void*);
 
+    // get the pointer to the pack struct (struct FnName_args) from the kernel addressed by the new_sym (FnName__args_new)
     void* pack = cthreads::kernels().get<NewFn>(new_sym.c_str())();
     try {
+        // try to collect the types and schemas from the meta data
         py::dict types = py::dict();
         py::dict schemas = py::dict();
         if (meta.contains("types")) {
@@ -131,32 +208,38 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
         if (meta.contains("schemas")) {
             schemas = meta["schemas"].cast<py::dict>();
         }
+        // write the actuall data to the pack struct (came from the kernel library, edited inplace here)
         fill_pack_from_values(symbol, params, ordered_values, pack, types, schemas);
     } catch (...) {
         cthreads::kernels().get<FreeFn>(free_sym.c_str())(pack);
         throw;
     }
 
+    // prep the result slot to be filled by the call function
     auto result_slot = std::make_shared<py::object>(py::none());
     // Keep Python arg objects alive for writeback.
     auto values_keep = std::make_shared<py::list>(ordered_values);
     auto meta_keep = std::make_shared<py::dict>(meta);
 
-    CallFn call_fn = cthreads::kernels().get<CallFn>(call_sym.c_str());
-    FreeFn free_fn = cthreads::kernels().get<FreeFn>(free_sym.c_str());
+    CallFn call_fn = cthreads::kernels().get<CallFn>(call_sym.c_str()); // the function to call the kernels internal fn from
+    FreeFn free_fn = cthreads::kernels().get<FreeFn>(free_sym.c_str()); // the function to free the pack struct
 
+    // create the cob object that runs the function, cleanes up and returns/updates the python side
     auto job = [call_fn, free_fn, pack, result_slot, values_keep, meta_keep, symbol]() mutable {
-        call_fn(pack);
+        call_fn(pack); // calls the kernels internal translated python fn with the packed args
         {
+            // acuire the gil to write back the result to the python side
             py::gil_scoped_acquire gil;
             py::dict types = py::dict();
             py::dict schemas = py::dict();
+            //  prep write back fields from the meta data
             if (meta_keep->contains("types")) {
                 types = (*meta_keep)["types"].cast<py::dict>();
             }
             if (meta_keep->contains("schemas")) {
                 schemas = (*meta_keep)["schemas"].cast<py::dict>();
             }
+            // write back the result to the python side
             writeback_params(
                 symbol,
                 (*meta_keep)["params"].cast<py::list>(),
@@ -165,40 +248,53 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
                 types,
                 schemas
             );
+            // read the return data and convert it to python object(s)
             *result_slot = read_return(*meta_keep, pack);
         }
-        free_fn(pack);
+        free_fn(pack); // free the pack struct
         pack = nullptr;
     };
 
+    // make a spawned kernel object to hold the job and relevant data
     auto spawned = std::make_unique<SpawnedKernel>();
     spawned->result = result_slot;
-    spawned->thr = cthreads::CThread::thread(std::move(job));
-    return spawned;
+    spawned->thr = cthreads::CThread::thread(std::move(job)); // therad the job function and return the pointer to the cthreads::CThread object
+    return spawned; // return the spawned kernel object
 }
 
+/**
+Takes python side args, kwargs and builds a list of arg values ordered to match the expected param signature
+
+Args:
+- meta: the compile time metadata from __kernel_meta__
+- args: the passed in python args
+- kwargs: the passed in python kwargs
+
+Returns:
+- py::list = the list of arg values ordered to match the expected param signature
+*/
 py::list bind_args(py::dict meta, py::args args, const py::kwargs& kwargs) {
-    py::list params = meta["params"].cast<py::list>();
+    py::list params = meta["params"].cast<py::list>(); // the compile time param metadata from __kernel_meta__
     const size_t n = params.size();
-    std::vector<bool> filled(n, false);
-    py::list ordered;
+    std::vector<bool> filled(n, false); // vector to keep track of values that have been assigned their spot
+    py::list ordered; // the list that will hold the ordered arg values
     for (size_t i = 0; i < n; ++i) {
-        ordered.append(py::none());
+        ordered.append(py::none()); // initialize the list with None for each param
     }
 
     // kwargs by name
     for (auto item : kwargs) {
         std::string key = py::str(item.first);
         bool found = false;
-        for (size_t i = 0; i < n; ++i) {
+        for (size_t i = 0; i < n; ++i) { // search all positions for the keyword arg
             py::dict p = params[i].cast<py::dict>();
-            if (p["name"].cast<std::string>() == key) {
+            if (p["name"].cast<std::string>() == key) { // if the name matches, assign the value to the position
                 if (filled[i]) {
                     throw py::type_error(
                         "cthreads.thread: multiple values for argument '" + key + "'"
                     );
                 }
-                ordered[i] = py::reinterpret_borrow<py::object>(item.second);
+                ordered[i] = py::reinterpret_borrow<py::object>(item.second); // assign the value to the position
                 filled[i] = true;
                 found = true;
                 break;
@@ -211,7 +307,7 @@ py::list bind_args(py::dict meta, py::args args, const py::kwargs& kwargs) {
         }
     }
 
-    // positional
+    // positional (fills free spots from left to right)
     size_t ai = 0;
     for (size_t i = 0; i < n && ai < args.size(); ++i) {
         if (filled[i]) {
