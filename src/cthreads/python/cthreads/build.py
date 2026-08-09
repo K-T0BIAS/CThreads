@@ -121,6 +121,14 @@ def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
         sources.append(cpp_path)
         include_dirs.add(hpp_path.parent)
 
+    # Bundled runtime headers (sync/, future math/, …) live under cpp/headers.
+    # Path: .../python/cthreads/build.py -> .../cpp/headers
+    runtime_headers = (
+        Path(__file__).resolve().parent.parent.parent / "cpp" / "headers"
+    )
+    if runtime_headers.is_dir():
+        include_dirs.add(runtime_headers)
+
     return sorted(set(sources)), sorted(include_dirs)
 
 

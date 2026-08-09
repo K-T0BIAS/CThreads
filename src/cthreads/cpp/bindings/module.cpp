@@ -2,10 +2,10 @@
 #include <pybind11/stl.h>
 
 #include "../headers/dispatch.hpp"
-#include "../headers/pyEvent.hpp"
-#include "../headers/pyLock.hpp"
-#include "../headers/pyRWLock.hpp"
 #include "../headers/pyThread.hpp"
+#include "../headers/sync/pyEvent.hpp"
+#include "../headers/sync/pyLock.hpp"
+#include "../headers/sync/pyRWLock.hpp"
 
 #include <cstdint>
 #include <memory>

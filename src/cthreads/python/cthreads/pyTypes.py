@@ -198,15 +198,15 @@ class PyThreadable(PyType):
 CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
     "Lock": {
         "cpp_name": "cthreads::sync::Lock",
-        "cpp_include": "pyLock.hpp",
+        "cpp_include": "sync/pyLock.hpp",
     },
     "Event": {
         "cpp_name": "cthreads::sync::Event",
-        "cpp_include": "pyEvent.hpp",
+        "cpp_include": "sync/pyEvent.hpp",
     },
     "RWLock": {
         "cpp_name": "cthreads::sync::RWLock",
-        "cpp_include": "pyRWLock.hpp",
+        "cpp_include": "sync/pyRWLock.hpp",
     },
 }
 

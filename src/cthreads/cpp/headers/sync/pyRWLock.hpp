@@ -25,4 +25,4 @@ public:
     std::shared_mutex& native_handle() { return _mu; }
 };
 
-} // namespace cthreads::sync
+}  // namespace cthreads::sync

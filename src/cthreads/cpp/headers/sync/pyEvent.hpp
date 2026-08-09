@@ -51,4 +51,4 @@ public:
     }
 };
 
-} // namespace
+}  // namespace cthreads::sync
