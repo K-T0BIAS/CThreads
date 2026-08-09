@@ -4,8 +4,14 @@ cthreads — Python frontend + native runtime.
 Public surface:
   @cthreads.Threadable / @cthreads.Thread
   cthreads.compile / build / prepare / thread
-  cthreads.Job (native thread handle)
+  cthreads.Job (awaitable native thread handle)
   cthreads.sync / cthreads.math / …  (pybind submodules on _ext)
+
+Jobs::
+
+    job = cthreads.thread(fn, ...)
+    result = await job                 # preferred async path (auto-starts)
+    job.start(); job.join(); job.result()   # sync still works
 
 Native API pattern (sync, math, future libs)
 --------------------------------------------
@@ -30,6 +36,7 @@ from .Thread.wrapper import Thread
 from .compile import compile
 from .build import build
 from .prepare import prepare, thread
+from .job import Job, wrap_job
 from . import CONFIG
 
 # --- _ext once; re-export submodules (same pattern for sync, math, …) --------
@@ -39,16 +46,18 @@ except ImportError:
     _ext = None  # type: ignore[assignment]
 
 if _ext is not None:
-    Job = _ext.Job
     sync = _ext.sync
     math = getattr(_ext, "math", None)  # older wheels may lack math
     load_kernels = _ext.load_kernels
     unload_kernels = _ext.unload_kernels
     host_os = _ext.host_os
-    spawn = _ext.thread
     kernel_path = getattr(_ext, "kernel_path", lambda: None)
+
+    def spawn(fn, *args: Any, **kwargs: Any) -> Job:
+        """Low-level: bind args and return an awaitable Job (no prepare/compile)."""
+        return wrap_job(_ext.thread(fn, *args, **kwargs))
+
 else:
-    Job = None  # type: ignore[assignment,misc]
     sync = None  # type: ignore[assignment,misc]
     math = None  # type: ignore[assignment]
     load_kernels = None  # type: ignore[assignment,misc]

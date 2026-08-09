@@ -114,3 +114,44 @@ def test_prepare_build_and_thread_job(tmp_module):
             unload_kernels()
         except Exception:
             pass
+
+
+@pytest.mark.integration
+def test_thread_job_await(tmp_module):
+    """Preferred async API: thread() then await job."""
+    try:
+        import cthreads._ext  # noqa: F401
+    except ImportError as e:
+        pytest.skip(f"cthreads._ext unavailable: {e}")
+
+    import asyncio
+
+    from cthreads import Job, thread, unload_kernels
+
+    mod = tmp_module(
+        """
+        from cthreads import Thread
+
+        @Thread
+        def add(a: int, b: int) -> int:
+            return a + b
+        """,
+        name="ct_integ_await",
+    )
+
+    async def main():
+        job = thread(mod.add, 10, 5, force=False)
+        assert isinstance(job, Job)
+        return await job
+
+    try:
+        assert asyncio.run(main()) == 15
+    except RuntimeError as e:
+        if "compiler" in str(e).lower() or "STORE" in str(e):
+            pytest.skip(str(e))
+        raise
+    finally:
+        try:
+            unload_kernels()
+        except Exception:
+            pass

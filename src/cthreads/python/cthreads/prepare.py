@@ -9,6 +9,7 @@ from typing import Any
 
 from .build import build
 from .compile import compile
+from .job import Job, wrap_job
 
 
 def prepare(force: bool = False) -> Path:
@@ -27,15 +28,19 @@ def prepare(force: bool = False) -> Path:
     return build(project_root=info["root"], force=force)
 
 
-def thread(fn, *args: Any, force: bool = False, **kwargs: Any):
+def thread(fn, *args: Any, force: bool = False, **kwargs: Any) -> Job:
     """
-    Ensure kernels are up to date, then spawn a native Job.
+    Ensure kernels are up to date, then return an awaitable Job.
 
-    Args:
-        force: if True, force codegen + relink before dispatch.
+    Usage::
+
+        job = cthreads.thread(fn, ...)
+        result = await job              # FastAPI / asyncio
+        # or
+        job.start(); job.join(); job.result()   # sync
     """
     from . import _ext
 
     binary = prepare(force=force)
     _ext.load_kernels(str(binary))
-    return _ext.thread(fn, *args, **kwargs)
+    return wrap_job(_ext.thread(fn, *args, **kwargs))
