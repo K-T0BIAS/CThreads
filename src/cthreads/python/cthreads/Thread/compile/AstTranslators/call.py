@@ -3,10 +3,10 @@ Copyright (c) 2026 Tobias Karusseit
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 
-Translate `ast.Call` - builtins + list/dict methods + math.* / cthreads.math.*.
+Translate `ast.Call` - builtins + list/dict + sync methods + math.* / cthreads.math.*.
 
-Python:  len(xs)          xs.append(v)     math.sqrt(x)
-C++:     (xs).size()      (xs).push_back(v)  std::sqrt(x)
+Python:  len(xs)          xs.append(v)     lock.acquire()   math.sqrt(x)
+C++:     (xs).size()      (xs).push_back(v) (lock).acquire()  std::sqrt(x)
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from ....pyOps import is_builtin_call
 from ..lib import add_include
 from ..mathLibTranslators import CMATH_INCLUDE, resolve_math_call
 from ..pythonContainerLibTranslators import resolve_container_op
+from ..syncBindingTranslators import resolve_sync_op
 from .context import TranslateContext
 
 
@@ -66,13 +67,27 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
         args = [translate_expr(a, ctx) for a in node.args]
         return container_op.emit(recv, args)
 
+    # cthreads.sync.Lock / Event / RWLock methods on a typed Name receiver.
+    sync_op = resolve_sync_op(node, ctx)
+    if sync_op is not None:
+        assert isinstance(node.func, ast.Attribute)
+        if sync_op.cpp_include:
+            add_include(
+                ctx.body_includes,
+                ctx.seen_body,
+                f'#include "{sync_op.cpp_include}"\n',
+            )
+        recv = translate_expr(node.func.value, ctx)
+        args = [translate_expr(a, ctx) for a in node.args]
+        return sync_op.emit(recv, args)
+
     # resolve the math call
     op = resolve_math_call(node, ctx)
     if op is None: # unsupported math call
         raise TypeError(
             f"Thread function {ctx.func_name}: "
             f"unsupported call (only whitelisted builtins / "
-            f"list|dict methods / math.* / cthreads.math.*)"
+            f"list|dict|sync methods / math.* / cthreads.math.*)"
         )
 
     # add the include for the math call

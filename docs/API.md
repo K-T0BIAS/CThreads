@@ -341,7 +341,7 @@ Allowed as `@Threadable` fields and `@Thread` parameters (marshal like other int
 | `Event` | `set`, `clear`, `is_set`, `wait`, `wait_for(seconds)` |
 | `RWLock` | `acquire_read` / `release_read` / `try_acquire_read`, `acquire_write` / `release_write` / `try_acquire_write` |
 
-GIL is released on blocking waits in the Python bindings. **Inside `@Thread` bodies**, sync method calls (e.g. `lock.acquire()`) are **not** in the call whitelist yet — same style of lowering as list/dict methods is still TODO. No `with` / context-manager syntax in Thread bodies.
+GIL is released on blocking waits in the Python bindings. **Inside `@Thread` bodies**, sync methods on a bare-name receiver (`lock.acquire()`, `ev.wait_for(t)`, …) lower to the matching C++ calls. No `with` / context-manager syntax; nested receivers (`self.lock.acquire`) are not supported yet. Passing `sync.Lock` into a kernel still needs pointer pack/schema support for a full end-to-end run.
 
 ---
 
@@ -445,7 +445,7 @@ assert job.result() == 10
 | Field annotations on `@Threadable` | `__init__` on `@Threadable` |
 | `await job` or `join()` after work | Assume unbound concurrent `thread(force=True)` while loaded |
 | `unload_kernels()` only when you mean it | Expect `prepare`/`thread` to unload for you |
-| Whitelisted calls (`len`/`range`, list/dict methods, `math`, `cthreads.math`) | Arbitrary Python calls / sync methods inside `@Thread` (yet) |
+| Whitelisted calls (`len`/`range`, list/dict methods, sync methods, `math`, `cthreads.math`) | Arbitrary Python calls inside `@Thread` |
 | `d.get(k, default)` / `d.pop(k, default)` | Bare `d.get(k)` / `d.pop(k)` (needs Optional / exceptions) |
 | Bare-name receivers: `xs.append(v)` | Nested receivers: `self.items.append(v)` (not yet) |
 | Annotated locals + name/attr assign | `xs[i] = v` / `d[k] = v` plain assign (not yet) |
