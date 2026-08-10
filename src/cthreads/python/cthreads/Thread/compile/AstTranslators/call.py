@@ -3,10 +3,10 @@ Copyright (c) 2026 Tobias Karusseit
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 
-Translate `ast.Call` - builtins + stdlib math.* / cthreads.math.*.
+Translate `ast.Call` - builtins + list/dict methods + math.* / cthreads.math.*.
 
-Python:  len(xs)          math.sqrt(x)     math.abs via cthreads.math
-C++:     (xs).size()      std::sqrt(x)     cthreads::math::abs(x)
+Python:  len(xs)          xs.append(v)     math.sqrt(x)
+C++:     (xs).size()      (xs).push_back(v)  std::sqrt(x)
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import ast
 from ....pyOps import is_builtin_call
 from ..lib import add_include
 from ..mathLibTranslators import CMATH_INCLUDE, resolve_math_call
+from ..pythonContainerLibTranslators import resolve_container_op
 from .context import TranslateContext
 
 
@@ -50,12 +51,28 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
         # since we use std::vector<T> we can use size() to get the length of the container
         return f"({arg}).size()"
 
+    # list/dict methods: resolve picks the op; translate recv+args here (same as math).
+    # Emit lambdas stay pure C++-string templates — do not call translate_expr inside them.
+    container_op = resolve_container_op(node, ctx)
+    if container_op is not None:
+        assert isinstance(node.func, ast.Attribute)  # guaranteed by resolve
+        if container_op.cpp_include:
+            add_include(
+                ctx.body_includes,
+                ctx.seen_body,
+                f'#include "{container_op.cpp_include}"\n',
+            )
+        recv = translate_expr(node.func.value, ctx)
+        args = [translate_expr(a, ctx) for a in node.args]
+        return container_op.emit(recv, args)
+
     # resolve the math call
     op = resolve_math_call(node, ctx)
     if op is None: # unsupported math call
         raise TypeError(
             f"Thread function {ctx.func_name}: "
-            f"unsupported call (only whitelisted builtins / math.* / cthreads.math.*)"
+            f"unsupported call (only whitelisted builtins / "
+            f"list|dict methods / math.* / cthreads.math.*)"
         )
 
     # add the include for the math call

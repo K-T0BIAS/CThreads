@@ -51,8 +51,8 @@ Used on `@Threadable` fields and `@Thread` parameters / returns.
 | `float` | `double` | |
 | `bool` | `bool` | |
 | `str` | `std::string` | |
-| `list[T]` | `std::vector<T>` | `T` must itself be allowed |
-| `dict[K, V]` | `std::unordered_map<K,V>` | keys: `str` or `int` for dispatch |
+| `list[T]` | `std::vector<T>` | `T` must itself be allowed; methods: see §7 |
+| `dict[K, V]` | `std::unordered_map<K,V>` | keys: `str` or `int` for dispatch; methods: see §7 |
 | `@Threadable` class | generated `struct` | nestable |
 | `cthreads.sync.Lock` / `Event` / `RWLock` | native sync types | marked internal |
 
@@ -214,18 +214,22 @@ Also available: `compile()`, `build()` (lower-level pieces used by `prepare`).
 
 ### Statements
 - Annotated assign: `x: int = 1`
-- Assign to known names / attributes / subscripts (after annotated declare)
-- AugAssign: `+=`, `-=`, `*=`, …
+- Assign to known **names** / **attributes** (after annotated declare) — not `xs[i] = …` / `d[k] = …` yet
+- AugAssign: `+=`, `-=`, `*=`, … (target may be a name, attribute, or subscript expr)
+- Expression statements that are **calls** (e.g. `xs.append(v);`) — needed for mutating container methods
 - `return`, `pass`, `if` / `else`, `while`, `break`, `continue`
-- `for x in xs:` when `xs` is a `list[...]`
+- `for x in xs:` when `xs` is a bare name typed as `list[...]`
 - `for i in range(n)` / `range(a, b)` / `range(a, b, s)` (positive step assumed)
+- No `try` / `except` / `raise` / `with` / `del` / `while-else` / `for-else`
 
 ### Expressions
-- Literals, names, `obj.attr`, `xs[i]` (no slices)
+- Literals, names, `obj.attr`, `xs[i]` / `d[k]` (no slices)
 - Arithmetic / bitwise ops in `pyOps.BINOPS` (including `%`, `**` → `std::pow`)
 - Unary `+`, `-`, `not`, `~`
 - Comparisons `== != < <= > >=` (including chains)
 - Boolean `and` / `or`
+
+**Indexing notes:** reads via `xs[i]` / `d[k]` lower to C++ `operator[]`. For `unordered_map`, missing-key `d[k]` **inserts** a default-constructed value — prefer `d.get(k, default)` when you need a fallback without insert.
 
 ### Calls (whitelist only)
 
@@ -236,6 +240,35 @@ n = len(xs)           # → (xs).size()
 for i in range(n):    # → C++ index for-loop
     ...
 ```
+
+**List / dict methods** (receiver must be a bare **name** in scope typed as `list[...]` / `dict[...]` — not `self.items.append` yet):
+
+```python
+@Thread
+def push(xs: list[int], v: int) -> None:
+    xs.append(v)
+    xs.extend(xs)          # same list element type
+    xs.insert(0, v)
+    last: int = xs.pop()   # or xs.pop(i)
+    xs.clear()
+
+@Thread
+def lookup(d: dict[str, int], k: str) -> int:
+    return d.get(k, 0)     # default required (no Optional/None)
+```
+
+| Type | Method | Args | C++ (approx.) |
+|------|--------|------|----------------|
+| `list` | `append` | 1 | `push_back` |
+| `list` | `extend` | 1 | `insert(end, other.begin, other.end)` |
+| `list` | `insert` | 2 | `insert(begin+i, v)` |
+| `list` | `pop` | 0 or 1 | copy + `pop_back` / erase at index |
+| `list` | `clear` | 0 | `clear` |
+| `dict` | `get` | **2** | `find` + default (no `get(k)` → `None`) |
+| `dict` | `pop` | **2** | find / erase + default (no KeyError path yet) |
+| `dict` | `clear` | 0 | `clear` |
+
+No keyword args on these methods. Unknown methods or bad arity raise at translate time.
 
 **Stdlib `math`** (resolved via globals — `import math` or `from math import sqrt`):
 
@@ -292,20 +325,23 @@ def bad(n: int) -> float:
 ## 8. Sync primitives
 
 ```python
-from cthreads import Thread, Threadable, sync
+from cthreads import sync
 
-@Threadable
-class Counter:
-    value: int
-
-    @Thread
-    def bump(self, lock: sync.Lock) -> None:
-        lock.acquire()
-        self.value += 1
-        lock.release()
+lock = sync.Lock()
+lock.acquire()
+# ...
+lock.release()
 ```
 
-Available on `cthreads.sync`: `Lock`, `Event`, `RWLock` (GIL released on blocking waits in the Python bindings). Pass instances into kernels like other allowed types.
+Allowed as `@Threadable` fields and `@Thread` parameters (marshal like other internal types).
+
+| Type | Methods (Python bindings / C++ API) |
+|------|--------------------------------------|
+| `Lock` | `acquire`, `release`, `try_acquire` |
+| `Event` | `set`, `clear`, `is_set`, `wait`, `wait_for(seconds)` |
+| `RWLock` | `acquire_read` / `release_read` / `try_acquire_read`, `acquire_write` / `release_write` / `try_acquire_write` |
+
+GIL is released on blocking waits in the Python bindings. **Inside `@Thread` bodies**, sync method calls (e.g. `lock.acquire()`) are **not** in the call whitelist yet — same style of lowering as list/dict methods is still TODO. No `with` / context-manager syntax in Thread bodies.
 
 ---
 
@@ -379,6 +415,25 @@ async def lifespan(app):
 
 Then per request: `await cthreads.thread(kernels.burn_ct, n)` with no unload races.
 
+### List methods
+
+```python
+from cthreads import Thread, thread
+
+@Thread
+def sum_push(xs: list[int], v: int) -> int:
+    xs.append(v)
+    s: int = 0
+    for x in xs:
+        s += x
+    return s
+
+job = thread(sum_push, [1, 2, 3], 4)
+job.start()
+job.join()
+assert job.result() == 10
+```
+
 ---
 
 ## 10. Quick reference — do / don’t
@@ -390,4 +445,7 @@ Then per request: `await cthreads.thread(kernels.burn_ct, n)` with no unload rac
 | Field annotations on `@Threadable` | `__init__` on `@Threadable` |
 | `await job` or `join()` after work | Assume unbound concurrent `thread(force=True)` while loaded |
 | `unload_kernels()` only when you mean it | Expect `prepare`/`thread` to unload for you |
-| Whitelisted calls (`math`, `cthreads.math`, `len`, `range`) | Arbitrary Python calls inside `@Thread` |
+| Whitelisted calls (`len`/`range`, list/dict methods, `math`, `cthreads.math`) | Arbitrary Python calls / sync methods inside `@Thread` (yet) |
+| `d.get(k, default)` / `d.pop(k, default)` | Bare `d.get(k)` / `d.pop(k)` (needs Optional / exceptions) |
+| Bare-name receivers: `xs.append(v)` | Nested receivers: `self.items.append(v)` (not yet) |
+| Annotated locals + name/attr assign | `xs[i] = v` / `d[k] = v` plain assign (not yet) |
