@@ -5,8 +5,8 @@ LICENSE file in the root directory of this source tree.
 
 Translate `ast.Call` - builtins + list/dict + sync methods + math.* / cthreads.math.*.
 
-Python:  len(xs)          xs.append(v)     lock.acquire()   math.sqrt(x)
-C++:     (xs).size()      (xs).push_back(v) (lock).acquire()  std::sqrt(x)
+Python:  len(xs)   __sync_state()   xs.append(v)   lock.acquire()   math.sqrt(x)
+C++:     (xs).size()  cthreads::detail::__sync_state()  (xs).push_back(v) ...
 """
 
 from __future__ import annotations
@@ -52,6 +52,21 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
         # since we use std::vector<T> we can use size() to get the length of the container
         return f"({arg}).size()"
 
+    # Kernel barrier: writeback pack Threadables into Python via `_ext` TLS
+    # (kernel DLL calls through sync_bridge → cthreads_ext_sync_state).
+    if is_builtin_call(node, "__sync_state"):
+        if node.keywords or node.args:
+            raise TypeError(
+                f"Thread function {ctx.func_name}: "
+                "__sync_state() takes no arguments"
+            )
+        add_include(
+            ctx.body_includes,
+            ctx.seen_body,
+            '#include "sync/syncState.hpp"\n',
+        )
+        return "cthreads::detail::__sync_state()"
+
     # list/dict methods: resolve picks the op; translate recv+args here (same as math).
     # Emit lambdas stay pure C++-string templates — do not call translate_expr inside them.
     container_op = resolve_container_op(node, ctx)
@@ -87,7 +102,7 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
         raise TypeError(
             f"Thread function {ctx.func_name}: "
             f"unsupported call (only whitelisted builtins / "
-            f"list|dict|sync methods / math.* / cthreads.math.*)"
+            f"__sync_state / list|dict|sync methods / math.* / cthreads.math.*)"
         )
 
     # add the include for the math call

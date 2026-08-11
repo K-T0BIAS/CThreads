@@ -10,7 +10,7 @@ import ast
 from dataclasses import dataclass
 
 from ....CONFIG import STORE
-from ....pyTypes import PyThreadable, hint_to_pytype
+from ....pyTypes import PyDict, PyList, PyThreadable, hint_to_pytype
 from ..lib import add_include, include_for
 from .context import TranslateContext
 
@@ -62,9 +62,11 @@ def translate_signature(func_def: ast.FunctionDef, ctx: TranslateContext) -> Sig
         py_type = hint_to_pytype(hint) # convert the hint to a pytype
         ctx.symbols[arg.arg] = py_type
         add_include(ctx.sig_includes, ctx.seen_sig, include_for(py_type)) # add the include for the pytype
-        if isinstance(py_type, PyThreadable): # if the pytype is a PyThreadable, add the reference to the argument
+        # Mutables (Threadable / list / dict) bind the pack slot by ref so kernel
+        # edits survive for writeback / sync_state. Primitives stay by value.
+        if isinstance(py_type, (PyThreadable, PyList, PyDict)):
             params.append(f"{py_type.cpp_name}& {arg.arg}")
-        else: # if the pytype is not a PyThreadable, add the value to the argument
+        else:
             params.append(f"{py_type.cpp_name} {arg.arg}")
 
     # vararg, kwarg, and kwonlyargs are not supported

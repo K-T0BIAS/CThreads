@@ -316,7 +316,12 @@ def build_kernel_meta(
             )
         hint = hints[name]
         py_type = hint_to_pytype(hint)
-        pass_as = "ref" if isinstance(py_type, PyThreadable) else "value"
+        # Match codegen signatures: mutables bind pack slots by ref.
+        pass_as = (
+            "ref"
+            if isinstance(py_type, (PyThreadable, PyList, PyDict))
+            else "value"
+        )
         params.append(
             _param_from_hint(
                 name, hint, pass_as=pass_as, types=types, completed=completed

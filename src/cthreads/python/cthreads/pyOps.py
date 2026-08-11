@@ -20,7 +20,7 @@ from __future__ import annotations
 import ast
 
 # Bare-name builtins lowered in codegen (not cthreads.* / math.* modules).
-BUILTINS: frozenset[str] = frozenset({"range", "len"})
+BUILTINS: frozenset[str] = frozenset({"range", "len", "__sync_state"})
 
 
 def is_builtin_call(node: ast.AST, name: str) -> bool:

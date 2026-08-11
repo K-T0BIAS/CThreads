@@ -16,6 +16,8 @@ Jobs::
     job = cthreads.thread(fn, ...)
     result = await job                 # preferred async path (auto-starts)
     job.start(); job.join(); job.result()   # sync still works
+    job.sync_state() / sync_state(job)      # mid-run Threadable writeback
+    __sync_state() in @Thread bodies        # compiled kernel barrier
 
 ``thread()`` spawns on already-loaded kernels (no per-call unload). First use
 runs cache-checked ``prepare`` + ``load_kernels``. Call ``unload_kernels()``
@@ -44,8 +46,19 @@ from .Thread.wrapper import Thread
 from .compile import compile
 from .build import build
 from .prepare import prepare, thread
-from .job import Job, wrap_job
+from .job import Job, wrap_job, sync_state
 from . import CONFIG
+
+# Kernel-only barrier: importable so ``from cthreads import __sync_state`` works
+# and codegen can resolve the name. Calling it from normal Python is an error —
+# it only runs after AST lowering to ``cthreads::detail::__sync_state()``
+# (kernel bridge → ``_ext`` TLS writeback).
+def __sync_state() -> None:
+    raise RuntimeError(
+        "cthreads.__sync_state() is only valid inside @Thread bodies "
+        "(it is compiled to cthreads::detail::__sync_state())"
+    )
+
 
 # --- _ext once; re-export submodules (same pattern for sync, math, ...) --------
 try:
@@ -85,6 +98,8 @@ __all__ = [
     "thread",
     "spawn",
     "Job",
+    "sync_state",
+    "__sync_state",
     "sync",
     "math",
     "load_kernels",

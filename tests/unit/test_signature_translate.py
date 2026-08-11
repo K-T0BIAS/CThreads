@@ -36,6 +36,24 @@ def test_signature_params_and_void_return():
     assert ctx.symbols["a"].cpp_name == "int"
 
 
+def test_signature_mutables_pass_by_ref():
+    ctx = make_ctx(
+        "mut",
+        hints={"xs": list[int], "d": dict[str, int], "return": type(None)},
+    )
+    fd = _func_def(
+        """
+        def mut(xs: list[int], d: dict[str, int]) -> None:
+            pass
+        """
+    )
+    parts = translate_signature(fd, ctx)
+    assert parts.params_csv == (
+        "std::vector<int>& xs, "
+        "std::unordered_map<std::string, int>& d"
+    )
+
+
 def test_signature_missing_annotation():
     ctx = make_ctx("f", hints={})
     fd = _func_def("def f(a):\n    pass")

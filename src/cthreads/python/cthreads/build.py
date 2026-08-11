@@ -136,6 +136,16 @@ def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
     if runtime_headers.is_dir():
         include_dirs.add(runtime_headers)
 
+    # Always link the sync bridge so `__sync_state()` can call into `_ext` TLS.
+    sync_bridge = (
+        Path(__file__).resolve().parent.parent.parent
+        / "cpp"
+        / "runtime"
+        / "sync_bridge.cpp"
+    )
+    if sync_bridge.is_file():
+        sources.append(sync_bridge)
+
     return sorted(set(sources)), sorted(include_dirs)
 
 

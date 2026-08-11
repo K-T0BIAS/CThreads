@@ -343,6 +343,33 @@ Allowed as `@Threadable` fields and `@Thread` parameters (marshal like other int
 
 GIL is released on blocking waits in the Python bindings. **Inside `@Thread` bodies**, sync methods on a bare-name receiver (`lock.acquire()`, `ev.wait_for(t)`, …) lower to the matching C++ calls. No `with` / context-manager syntax; nested receivers (`self.lock.acquire`) are not supported yet. Passing `sync.Lock` into a kernel still needs pointer pack/schema support for a full end-to-end run.
 
+### Mid-run state sync (`__sync_state` / `sync_state`)
+
+```python
+from cthreads import Thread, Threadable, thread, sync_state, __sync_state
+
+@Threadable
+class SimState:
+    step: int
+
+@Thread
+def run(state: SimState, n: int) -> None:
+    for i in range(n):
+        state.step = i
+        __sync_state()          # writeback pack → Python Threadables
+
+state = SimState()
+state.step = 0
+job = thread(run, state, 100).start()
+while not job.done():
+    sync_state(job)             # host steal of the same mutex + writeback
+    print(state.step)
+job.join()
+```
+
+- `__sync_state()` — bare builtin inside `@Thread`; codegen → `cthreads::detail::__sync_state()` (TLS JobContext).
+- `sync_state(job)` / `job.sync_state()` — host API; same writeback path. Job must be started; no-op after finish.
+
 ---
 
 ## 9. End-to-end examples

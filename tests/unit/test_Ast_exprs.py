@@ -86,6 +86,19 @@ def test_builtin_len_call():
         call.translate(parse_expr("len(xs, n)"), ctx)
 
 
+def test_builtin_sync_state_call():
+    from cthreads.Thread.compile.AstTranslators import call
+
+    ctx = make_ctx()
+    assert (
+        call.translate(parse_expr("__sync_state()"), ctx)
+        == "cthreads::detail::__sync_state()"
+    )
+    assert any("sync/syncState.hpp" in line for line in ctx.body_includes)
+    with pytest.raises(TypeError, match="__sync_state"):
+        call.translate(parse_expr("__sync_state(1)"), ctx)
+
+
 def test_unaryop():
     ctx = make_ctx(symbols={"a": PyInt(), "f": PyFloat()})
     assert unaryOp.translate(parse_expr("-a"), ctx) == "(-a)"

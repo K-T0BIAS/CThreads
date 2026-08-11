@@ -19,6 +19,7 @@ class _FakeRaw:
         self._done = False
         self._started = False
         self._thread: threading.Thread | None = None
+        self.sync_calls = 0
 
     def start(self):
         if self._started:
@@ -48,11 +49,42 @@ class _FakeRaw:
     def result(self):
         return self._value
 
+    def sync_state(self):
+        self.sync_calls += 1
+
 
 def test_wrap_job_idempotent():
     j = Job(_FakeRaw())
     assert wrap_job(j) is j
     assert isinstance(wrap_job(_FakeRaw()), Job)
+
+
+def test_job_sync_state_requires_start():
+    from cthreads.job import sync_state as sync_state_fn
+
+    job = Job(_FakeRaw())
+    with pytest.raises(RuntimeError, match="not started"):
+        job.sync_state()
+    with pytest.raises(RuntimeError, match="not started"):
+        sync_state_fn(job)
+
+
+def test_job_sync_state_delegates_to_raw():
+    from cthreads.job import sync_state as sync_state_fn
+
+    raw = _FakeRaw()
+    job = Job(raw)
+    job.start()
+    job.sync_state()
+    sync_state_fn(job)
+    assert raw.sync_calls == 2
+
+
+def test_sync_state_rejects_non_job():
+    from cthreads.job import sync_state as sync_state_fn
+
+    with pytest.raises(TypeError, match="expected a cthreads.Job"):
+        sync_state_fn(object())  # type: ignore[arg-type]
 
 
 def test_sync_start_join_result():

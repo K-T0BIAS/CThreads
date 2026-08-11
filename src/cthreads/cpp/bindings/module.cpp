@@ -13,9 +13,12 @@
 #include "../headers/sync/pyEvent.hpp"
 #include "../headers/sync/pyLock.hpp"
 #include "../headers/sync/pyRWLock.hpp"
+#include "../headers/sync/syncState.hpp"
 
 #include <cstdint>
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,14 +26,49 @@ namespace py = pybind11;
 
 namespace {
 
+// JobContext TLS lives ONLY in this extension DLL. Kernels call into
+// cthreads_ext_sync_state via sync_bridge (bound at load_kernels).
+thread_local cthreads::detail::JobContext* g_job = nullptr;
+std::atomic<int> g_ext_sync_invocations{0};
+
+void set_job_context(cthreads::detail::JobContext* ctx) { g_job = ctx; }
+
+void cthreads_ext_sync_state() {
+    g_ext_sync_invocations.fetch_add(1, std::memory_order_relaxed);
+    cthreads::detail::JobContext* ctx = g_job;
+    if (!ctx || !ctx->do_writeback || !ctx->pack) {
+        return;
+    }
+    ctx->do_writeback(ctx);
+}
+
+void bind_sync_state_to_kernels() {
+    if (!cthreads::kernels().loaded()) {
+        return;
+    }
+    void* p = cthreads::kernels().sym("cthreads_bind_sync_state");
+    if (!p) {
+        return; // older kernel DLL without bridge — __sync_state no-ops
+    }
+    using BindFn = void (*)(void (*)());
+    reinterpret_cast<BindFn>(p)(&cthreads_ext_sync_state);
+}
+
 /**
 Defines the c++ object behind a python Job object.
 It holds the compiled cthreads threaded function (from @Thread) and 
-the place to stash the result value(s)
+the place to stash the result value(s).
+
+Also owns pack + marshal metadata so mid-run `__sync_state()` / host
+`sync_state(job)` can writeback Threadable/list/dict args into Python.
 
 Attributes:
 - thr: std::unique_ptr<cthreads::CThread> = pointer to the compiled cthreads threaded function
 - result: std::shared_ptr<py::object> = pointer to the place to stash the result value(s)
+- state_mu: mutex stolen by host sync_state / held during writeback
+- pack / free_fn: args struct kept alive until final writeback
+- symbol / values_keep / meta_keep / types_keep / schemas_keep: marshal inputs
+- finished: true after final writeback (pack may already be freed)
 
 Methods:
 - start(): void = calls start() on the compiled cthreads threaded function
@@ -38,11 +76,23 @@ Methods:
 - wait(): void = calls wait() on the compiled cthreads threaded function
 - done(): bool = calls done() on the compiled cthreads threaded function
 - get_result(): py::object = returns the result value(s) (if no result, this returns py::none)
+- sync_state(): void = host steal of state_mu + writeback into Python
 */
 struct SpawnedKernel {
 
     std::unique_ptr<cthreads::CThread> thr;
     std::shared_ptr<py::object> result;
+
+    // Mid-run sync / writeback ownership (was previously only lambda-local).
+    std::mutex state_mu;
+    void* pack = nullptr;
+    void (*free_fn)(void*) = nullptr;
+    std::string symbol;
+    std::shared_ptr<py::list> values_keep;
+    std::shared_ptr<py::dict> meta_keep;
+    std::shared_ptr<py::dict> types_keep;
+    std::shared_ptr<py::dict> schemas_keep;
+    bool finished = false;
 
     void start() { thr->start(); }
     void join() { thr->join(); }
@@ -53,6 +103,17 @@ struct SpawnedKernel {
             return py::none();
         }
         return *result;
+    }
+
+    // Host API: steal state_mu, writeback Threadables into Python, release.
+    void sync_state();
+
+    ~SpawnedKernel() {
+        // Safety net if the worker never ran / free was skipped.
+        if (pack && free_fn) {
+            free_fn(pack);
+            pack = nullptr;
+        }
     }
 };
 
@@ -130,6 +191,53 @@ void writeback_params(
 }
 
 /**
+ * Extension-side writeback used by kernel `__sync_state()` (via TLS JobContext).
+ * Lock order: state_mu first, then GIL (never reverse — avoids deadlock).
+ */
+void job_do_writeback(cthreads::detail::JobContext* ctx) {
+    if (!ctx || !ctx->state_mu || !ctx->pack) {
+        return;
+    }
+    std::lock_guard<std::mutex> g(*ctx->state_mu);
+    py::gil_scoped_acquire gil;
+
+    auto* symbol = static_cast<std::string*>(ctx->symbol);
+    auto* params = static_cast<py::list*>(ctx->params);
+    auto* values = static_cast<py::list*>(ctx->values);
+    auto* types = static_cast<py::dict*>(ctx->types);
+    auto* schemas = static_cast<py::dict*>(ctx->schemas);
+    if (!symbol || !params || !values || !types || !schemas) {
+        return;
+    }
+    writeback_params(*symbol, *params, *values, ctx->pack, *types, *schemas);
+}
+
+/**
+ * Host steal: same writeback as `__sync_state()`, using SpawnedKernel-owned pack/meta.
+ * No-op if the job already finished (final writeback already ran).
+ */
+void SpawnedKernel::sync_state() {
+    if (finished || !pack) {
+        return;
+    }
+    std::lock_guard<std::mutex> g(state_mu);
+    py::gil_scoped_acquire gil;
+    if (finished || !pack) {
+        return;
+    }
+    // get the params list from the kept meta (same shape as final writeback)
+    py::list params = (*meta_keep)["params"].cast<py::list>();
+    writeback_params(
+        symbol,
+        params,
+        *values_keep,
+        pack,
+        *types_keep,
+        *schemas_keep
+    );
+}
+
+/**
 Reads the return data and converts it to python object(s)
 
 Args:
@@ -198,10 +306,11 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
 
     // get the pointer to the pack struct (struct FnName_args) from the kernel addressed by the new_sym (FnName__args_new)
     void* pack = cthreads::kernels().get<NewFn>(new_sym.c_str())();
+    // keep types/schemas outside try so we can store them on SpawnedKernel for mid-run sync
+    py::dict types = py::dict();
+    py::dict schemas = py::dict();
     try {
         // try to collect the types and schemas from the meta data
-        py::dict types = py::dict();
-        py::dict schemas = py::dict();
         if (meta.contains("types")) {
             types = meta["types"].cast<py::dict>();
         }
@@ -220,44 +329,77 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
     // Keep Python arg objects alive for writeback.
     auto values_keep = std::make_shared<py::list>(ordered_values);
     auto meta_keep = std::make_shared<py::dict>(meta);
+    auto types_keep = std::make_shared<py::dict>(types);
+    auto schemas_keep = std::make_shared<py::dict>(schemas);
+    // params list owned for job lifetime (TLS points here; must not be a worker-stack temp)
+    auto params_keep = std::make_shared<py::list>(params);
 
     CallFn call_fn = cthreads::kernels().get<CallFn>(call_sym.c_str()); // the function to call the kernels internal fn from
     FreeFn free_fn = cthreads::kernels().get<FreeFn>(free_sym.c_str()); // the function to free the pack struct
 
-    // create the cob object that runs the function, cleanes up and returns/updates the python side
-    auto job = [call_fn, free_fn, pack, result_slot, values_keep, meta_keep, symbol]() mutable {
-        call_fn(pack); // calls the kernels internal translated python fn with the packed args
-        {
-            // acuire the gil to write back the result to the python side
-            py::gil_scoped_acquire gil;
-            py::dict types = py::dict();
-            py::dict schemas = py::dict();
-            //  prep write back fields from the meta data
-            if (meta_keep->contains("types")) {
-                types = (*meta_keep)["types"].cast<py::dict>();
-            }
-            if (meta_keep->contains("schemas")) {
-                schemas = (*meta_keep)["schemas"].cast<py::dict>();
-            }
-            // write back the result to the python side
-            writeback_params(
-                symbol,
-                (*meta_keep)["params"].cast<py::list>(),
-                *values_keep,
-                pack,
-                types,
-                schemas
-            );
-            // read the return data and convert it to python object(s)
-            *result_slot = read_return(*meta_keep, pack);
-        }
-        free_fn(pack); // free the pack struct
-        pack = nullptr;
-    };
-
     // make a spawned kernel object to hold the job and relevant data
     auto spawned = std::make_unique<SpawnedKernel>();
     spawned->result = result_slot;
+    // own pack + marshal inputs for the full job lifetime (mid-run __sync_state / sync_state)
+    spawned->pack = pack;
+    spawned->free_fn = free_fn;
+    spawned->symbol = symbol;
+    spawned->values_keep = values_keep;
+    spawned->meta_keep = meta_keep;
+    spawned->types_keep = types_keep;
+    spawned->schemas_keep = schemas_keep;
+
+    SpawnedKernel* self = spawned.get(); // raw ptr for the worker lambda (spawned outlives the thread start)
+    // params_keep captured by value so the shared_ptr keeps the list alive with the lambda/job
+    auto params_keep_for_job = params_keep;
+
+    // create the cob object that runs the function, cleanes up and returns/updates the python side
+    auto job = [call_fn, self, params_keep_for_job]() mutable {
+        // Install TLS context so codegen'd `__sync_state()` can writeback mid-run.
+        cthreads::detail::JobContext ctx{};
+        ctx.state_mu = &self->state_mu;
+        ctx.pack = self->pack;
+        ctx.symbol = &self->symbol;
+        ctx.params = params_keep_for_job.get();
+        ctx.values = self->values_keep.get();
+        ctx.types = self->types_keep.get();
+        ctx.schemas = self->schemas_keep.get();
+        ctx.do_writeback = &job_do_writeback;
+
+        set_job_context(&ctx);
+        try {
+            call_fn(self->pack); // calls the kernels internal translated python fn with the packed args
+        } catch (...) {
+            set_job_context(nullptr);
+            throw;
+        }
+        set_job_context(nullptr);
+
+        {
+            // acuire the gil to write back the result to the python side
+            // also hold state_mu so host sync_state cannot race final writeback
+            std::lock_guard<std::mutex> g(self->state_mu);
+            py::gil_scoped_acquire gil;
+            // write back the result to the python side
+            writeback_params(
+                self->symbol,
+                *params_keep_for_job,
+                *self->values_keep,
+                self->pack,
+                *self->types_keep,
+                *self->schemas_keep
+            );
+            // read the return data and convert it to python object(s)
+            *self->result = read_return(*self->meta_keep, self->pack);
+            // free the pack struct (only after final writeback)
+            if (self->pack && self->free_fn) {
+                self->free_fn(self->pack);
+                self->pack = nullptr;
+            }
+            self->finished = true;
+        }
+    };
+
     spawned->thr = cthreads::CThread::thread(std::move(job)); // therad the job function and return the pointer to the cthreads::CThread object
     return spawned; // return the spawned kernel object
 }
@@ -340,7 +482,10 @@ PYBIND11_MODULE(_ext, m) {
 
     m.def(
         "load_kernels",
-        &cthreads::load_kernels,
+        [](const std::string& path) {
+            cthreads::load_kernels(path);
+            bind_sync_state_to_kernels();
+        },
         py::arg("path"),
         "Load the shared library produced by api.build() (BINARY_PATH)."
     );
@@ -362,6 +507,16 @@ PYBIND11_MODULE(_ext, m) {
         "Unload the kernel shared library (needed before force-rebuild on Windows)."
     );
 
+    m.def(
+        "_debug_ext_sync_invocations",
+        []() { return g_ext_sync_invocations.load(std::memory_order_relaxed); },
+        "Test helper: times cthreads_ext_sync_state was entered."
+    );
+    m.def(
+        "_debug_reset_ext_sync_invocations",
+        []() { g_ext_sync_invocations.store(0, std::memory_order_relaxed); }
+    );
+
     py::class_<SpawnedKernel, std::unique_ptr<SpawnedKernel>>(m, "Job")
         .def("start", &SpawnedKernel::start)
         .def("join", &SpawnedKernel::join,
@@ -369,7 +524,14 @@ PYBIND11_MODULE(_ext, m) {
         .def("done", &SpawnedKernel::done)
         .def("wait", &SpawnedKernel::wait,
              py::call_guard<py::gil_scoped_release>())
-        .def("result", &SpawnedKernel::get_result);
+        .def("result", &SpawnedKernel::get_result)
+        .def(
+            "sync_state",
+            &SpawnedKernel::sync_state,
+            py::call_guard<py::gil_scoped_release>(),
+            "Steal the job state mutex and writeback Threadable/list/dict "
+            "args into Python (same effect as kernel __sync_state())."
+        );
 
     m.def(
         "thread",

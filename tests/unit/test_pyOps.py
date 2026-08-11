@@ -27,9 +27,10 @@ def test_tables_are_typed_dicts():
 
 
 def test_builtins_whitelist():
-    assert BUILTINS == frozenset({"range", "len"})
+    assert BUILTINS == frozenset({"range", "len", "__sync_state"})
     assert is_builtin_call(parse_expr("range(n)"), "range")
     assert is_builtin_call(parse_expr("len(xs)"), "len")
+    assert is_builtin_call(parse_expr("__sync_state()"), "__sync_state")
     assert not is_builtin_call(parse_expr("range(n)"), "len")
     assert not is_builtin_call(parse_expr("len(xs)"), "range")
     assert not is_builtin_call(parse_expr("math.sqrt(x)"), "len")

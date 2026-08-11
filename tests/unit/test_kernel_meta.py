@@ -156,6 +156,20 @@ def test_build_kernel_meta_list_str_ok():
     meta = build_kernel_meta(join_xs, symbol="join_xs")
     assert meta.params[0].kind == "list"
     assert meta.params[0].list_inner == "str"
+    assert meta.params[0].pass_as == "ref"
+
+
+def test_build_kernel_meta_list_and_dict_pass_as_ref():
+    @Thread
+    def mut_list(xs: list[int]) -> None:
+        pass
+
+    @Thread
+    def mut_dict(d: dict[str, float]) -> None:
+        pass
+
+    assert build_kernel_meta(mut_list, symbol="mut_list").params[0].pass_as == "ref"
+    assert build_kernel_meta(mut_dict, symbol="mut_dict").params[0].pass_as == "ref"
 
 
 def test_build_kernel_meta_missing_owner():
