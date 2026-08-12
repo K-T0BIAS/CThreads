@@ -6,13 +6,17 @@ LICENSE file in the root directory of this source tree.
 Translate `ast.Assign` — plain assignment.
 
 Python:  p.velocity = limit
+         xs[i] = v
+         d[k] = v
          x = a + 1
-AST:     Assign(targets=[Attribute(...)], value=...)
+AST:     Assign(targets=[...], value=...)
 C++:     p.velocity = limit;
+         (xs[i]) = v;
+         (d[k]) = v;
          x = (a + 1);
 
 New locals must still be introduced with AnnAssign (`x: int = ...`).
-Assign only updates an existing name or an attribute.
+Assign updates an existing name, attribute, or subscript (list / dict / buffer index).
 """
 
 import ast
@@ -47,7 +51,13 @@ def translate(node: ast.Assign, ctx: TranslateContext) -> list[str]:
                 f"assign to unknown name {target.id!r} "
                 "(declare it with an annotated assignment first)"
             )
-    elif not isinstance(target, ast.Attribute): # if the target is not an attribute (this is not an attribute access and thus cant be assigned)
+    elif isinstance(target, ast.Subscript):
+        if isinstance(target.slice, ast.Slice):
+            raise TypeError(
+                f"Thread function {ctx.func_name}: "
+                "slice assignment is not supported"
+            )
+    elif not isinstance(target, ast.Attribute):
         raise TypeError(
             f"Thread function {ctx.func_name}: "
             f"unsupported assign target {type(target).__name__}"

@@ -2,7 +2,7 @@
 
 import pytest
 
-from cthreads.pyTypes import PyFloat, PyInt, PyList
+from cthreads.pyTypes import PyDict, PyFloat, PyInt, PyList, PyString
 from cthreads.Thread.compile.AstTranslators import (
     annAssign,
     assign,
@@ -45,6 +45,21 @@ def test_assign_known_name_and_attr():
     assert assign.translate(parse_stmt("p.velocity = 1.0"), ctx) == [
         "    p.velocity = 1.0;"
     ]
+
+
+def test_assign_subscript_list_and_dict():
+    ctx = make_ctx(
+        symbols={
+            "xs": PyList(PyFloat()),
+            "d": PyDict(PyString(), PyInt()),
+            "i": PyInt(),
+            "k": PyString(),
+            "v": PyFloat(),
+            "n": PyInt(),
+        }
+    )
+    assert assign.translate(parse_stmt("xs[i] = v"), ctx) == ["    (xs[i]) = v;"]
+    assert assign.translate(parse_stmt("d[k] = n"), ctx) == ["    (d[k]) = n;"]
 
 
 def test_assign_unknown_and_multi_target():
