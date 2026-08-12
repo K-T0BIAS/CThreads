@@ -172,6 +172,57 @@ def test_build_kernel_meta_list_and_dict_pass_as_ref():
     assert build_kernel_meta(mut_dict, symbol="mut_dict").params[0].pass_as == "ref"
 
 
+def test_build_kernel_meta_tbuffer_fixed_and_threadable():
+    class TBufferF64:
+        __cthreads_internal__ = True
+
+    @Thread
+    def fill(buf: TBufferF64) -> None:
+        pass
+
+    meta = build_kernel_meta(fill, symbol="fill")
+    assert meta.params[0].kind == "tbuffer"
+    assert meta.params[0].pass_as == "tbuffer"
+    assert meta.params[0].schema.inner.kind == "float"
+
+    from cthreads.pyTypes import TBuffer
+
+    @Threadable
+    class Particle:
+        x: float
+        y: float
+
+    @Thread
+    def move(buf: TBuffer[Particle]) -> None:
+        pass
+
+    meta2 = build_kernel_meta(move, symbol="move")
+    assert meta2.params[0].kind == "tbuffer"
+    assert meta2.params[0].pass_as == "tbuffer"
+    assert meta2.params[0].schema.cpp_type == "cthreads::sync::tripple_buffer<Particle>"
+    assert meta2.params[0].schema.inner.type_name == "Particle"
+
+
+def test_emit_trampoline_tbuffer_ptr():
+    tbuf = TypeSchema(
+        "tbuffer",
+        "cthreads::sync::tripple_buffer<double>",
+        inner=TypeSchema("float", "double"),
+    )
+    meta = KernelMeta(
+        symbol="fill",
+        call_symbol="fill__call",
+        args_new_symbol="fill__new",
+        args_free_symbol="fill__free",
+        params=[ParamMeta("buf", "tbuffer", tbuf)],
+        return_schema=None,
+    )
+    cpp = emit_trampoline_cpp(meta, real_call="fill")
+    assert "cthreads::sync::tripple_buffer<double>* a0;" in cpp
+    assert "fill__set_a0_ptr(void* p, void* buf)" in cpp
+    assert "fill(*a->a0);" in cpp
+
+
 def test_build_kernel_meta_missing_owner():
     @Thread
     def step(self, dt: float) -> None:

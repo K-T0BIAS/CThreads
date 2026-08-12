@@ -223,6 +223,12 @@ def _resolve_schema(
     return schema
 
 
+def _tbuffer_native_ptr(value: Any, inner_type_name: str | None = None) -> int:
+    from .tbuffer_host import tbuffer_ptr
+
+    return tbuffer_ptr(value, inner_type_name)
+
+
 def pack_value(
     lib,
     symbol: str,
@@ -350,6 +356,23 @@ def pack_value(
                     pack,
                     schemas=schemas,
                 )
+        return
+
+    if kind == "tbuffer":
+        inner = schema.get("inner") or {}
+        inner_name = inner.get("type_name")
+        ptr = _tbuffer_native_ptr(
+            value,
+            inner_type_name=inner_name if inner.get("kind") == "threadable" else None,
+        )
+        fn = _fn(lib, f"{symbol}__set_{prefix}_ptr")
+        _call(
+            fn,
+            None,
+            [ctypes.c_void_p, ctypes.c_void_p],
+            pack,
+            ctypes.c_void_p(ptr),
+        )
         return
 
     raise TypeError(f"unsupported schema kind {kind!r}")
@@ -639,5 +662,14 @@ def _legacy_schema(p: dict[str, Any]) -> dict[str, Any]:
             "cpp_type": p.get("cpp_type", ""),
             "type_name": p.get("cpp_type"),
             "fields": fields,
+        }
+    if kind == "tbuffer":
+        inner = p.get("schema", {}).get("inner")
+        if inner is None:
+            raise TypeError("legacy tbuffer param missing inner schema")
+        return {
+            "kind": "tbuffer",
+            "cpp_type": p.get("cpp_type", ""),
+            "inner": inner,
         }
     raise TypeError(f"cannot legacy-upgrade kind {kind!r}")

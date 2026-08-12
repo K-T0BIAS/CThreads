@@ -73,4 +73,9 @@ def compile(force: bool = False) -> dict:
     # Keep REGISTRY so prepare(force=True) / second compile() still sees units.
     cache["units"] = cache.get("units", {})
     save_cache(root, cache)
+
+    from .kernel_meta import write_tbuffer_runtime
+
+    write_tbuffer_runtime(root)
+
     return {"root": root, "cache": cache, "rewritten": rewritten}

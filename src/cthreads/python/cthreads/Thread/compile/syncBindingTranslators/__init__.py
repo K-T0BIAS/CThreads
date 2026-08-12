@@ -14,6 +14,12 @@ from .syncOps import (
     SYNC_METHODS,
     SyncOp,
 )
+from .tripple_buffer import (
+    TBUFFER_METHODS,
+    TBufferOp,
+    is_tbuffer_op,
+    resolve_tbuffer_op,
+)
 
 __all__ = [
     "EVENT_METHODS",
@@ -21,6 +27,10 @@ __all__ = [
     "RWLOCK_METHODS",
     "SYNC_METHODS",
     "SyncOp",
+    "TBUFFER_METHODS",
+    "TBufferOp",
     "is_sync_op",
+    "is_tbuffer_op",
     "resolve_sync_op",
+    "resolve_tbuffer_op",
 ]

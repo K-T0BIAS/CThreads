@@ -4,6 +4,7 @@ import pytest
 
 from cthreads.pyTypes import (
     PyBool,
+    PyCthreadsInternal,
     PyDict,
     PyFloat,
     PyInt,
@@ -72,3 +73,21 @@ def test_hint_to_pytype_unknown_rejected():
 
     with pytest.raises(TypeError, match="Cannot map type"):
         hint_to_pytype(Nope)
+
+
+def test_hint_to_pytype_tbuffer_internal():
+    class TBufferF64:
+        __cthreads_internal__ = True
+
+    py = hint_to_pytype(TBufferF64)
+    assert isinstance(py, PyCthreadsInternal)
+    assert py.cpp_name == "cthreads::sync::tripple_buffer<double>"
+    inc = py.build_include()
+    assert '#include "sync/t_buffer.hpp"' in inc
+
+    class TBufferListF64:
+        __cthreads_internal__ = True
+
+    py_list = hint_to_pytype(TBufferListF64)
+    assert "std::vector<double>" in py_list.cpp_name
+    assert "#include <vector>" in py_list.build_include()

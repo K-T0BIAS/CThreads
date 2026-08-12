@@ -146,6 +146,19 @@ def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
     if sync_bridge.is_file():
         sources.append(sync_bridge)
 
+    thread_dirs: set[Path] = set()
+    for hpp in CONFIG.STORE.values():
+        hpp_path = Path(hpp).resolve()
+        if hpp_path.parent.name == "__Threadable__":
+            thread_dirs.add(hpp_path.parent.parent / "__Thread__")
+        elif hpp_path.parent.name == "__Thread__":
+            thread_dirs.add(hpp_path.parent)
+    for thread_dir in thread_dirs:
+        tbuf_cpp = thread_dir / "cthreads_tbuffer.cpp"
+        if tbuf_cpp.is_file():
+            sources.append(tbuf_cpp)
+            include_dirs.add(thread_dir)
+
     return sorted(set(sources)), sorted(include_dirs)
 
 

@@ -14,12 +14,14 @@
 #include "../headers/sync/pyLock.hpp"
 #include "../headers/sync/pyRWLock.hpp"
 #include "../headers/sync/syncState.hpp"
+#include "../headers/sync/t_buffer.hpp"
 
 #include <cstdint>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace py = pybind11;
@@ -473,6 +475,57 @@ py::list bind_args(py::dict meta, py::args args, const py::kwargs& kwargs) {
     return ordered;
 }
 
+std::uintptr_t tbuffer_native_ptr(py::object obj, py::object type_name_obj = py::none()) {
+    using cthreads::sync::tripple_buffer;
+
+    if (py::isinstance<tripple_buffer<double>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<tripple_buffer<double>&>());
+    }
+    if (py::isinstance<tripple_buffer<int>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<tripple_buffer<int>&>());
+    }
+    if (py::isinstance<tripple_buffer<bool>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<tripple_buffer<bool>&>());
+    }
+    if (py::isinstance<tripple_buffer<std::string>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<tripple_buffer<std::string>&>());
+    }
+    if (py::isinstance<tripple_buffer<std::vector<double>>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(
+            &obj.cast<tripple_buffer<std::vector<double>>&>()
+        );
+    }
+    if (py::isinstance<tripple_buffer<std::unordered_map<std::string, double>>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(
+            &obj.cast<tripple_buffer<std::unordered_map<std::string, double>>&>()
+        );
+    }
+    if (py::isinstance<tripple_buffer<py::object>>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<tripple_buffer<py::object>&>());
+    }
+
+    if (!type_name_obj.is_none()) {
+        const std::string type_name = type_name_obj.cast<std::string>();
+        if (py::isinstance<py::capsule>(obj)) {
+            py::capsule cap = obj;
+            const std::string expected = "cthreads.tbuffer." + type_name;
+            if (cap.name() && std::string(cap.name()) == expected) {
+                return reinterpret_cast<std::uintptr_t>(cap.get_pointer<void>());
+            }
+            throw std::runtime_error(
+                "cthreads.tbuffer_native_ptr: capsule name does not match "
+                "threadable type '" + type_name + "'");
+        }
+        throw std::runtime_error(
+            "cthreads.tbuffer_native_ptr: no native triple buffer for "
+            "threadable type '" + type_name + "'; pass a pybind buffer or "
+            "capsule named cthreads.tbuffer." + type_name);
+    }
+
+    throw std::runtime_error(
+        "cthreads.tbuffer_native_ptr: unsupported triple-buffer object type");
+}
+
 } // namespace
 
 PYBIND11_MODULE(_ext, m) {
@@ -488,6 +541,15 @@ PYBIND11_MODULE(_ext, m) {
         },
         py::arg("path"),
         "Load the shared library produced by api.build() (BINARY_PATH)."
+    );
+
+    m.def(
+        "tbuffer_native_ptr",
+        &tbuffer_native_ptr,
+        py::arg("obj"),
+        py::arg("type_name") = py::none(),
+        "Return the native address of a cthreads.sync.TBuffer* object "
+        "(or threadable capsule) for kernel marshalling."
     );
 
     m.def(
@@ -603,6 +665,184 @@ PYBIND11_MODULE(_ext, m) {
              py::call_guard<py::gil_scoped_release>());
 
     rwlock.attr("__cthreads_internal__") = true;
+
+    // Fixed-capacity triple buffers (baseline bindings for primitive/container types).
+    // Thread-side writes are typically codegen'd as: buf[i].field = ... (for Threadables)
+    // or buf[i] = value (for scalar/container slots).
+    auto tbuf_f64 = py::class_<cthreads::sync::tripple_buffer<double>>(sync, "TBufferF64")
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<double>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<double>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<double>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<double>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<double>& self, int index) -> double {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferF64 index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<double>& self, int index, double value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferF64 index out of range");
+            self[static_cast<size_t>(index)] = value;
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<double>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<double>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_f64.attr("__cthreads_internal__") = true;
+
+    auto tbuf_i64 = py::class_<cthreads::sync::tripple_buffer<int>>(sync, "TBufferI64")
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<int>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<int>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<int>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<int>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<int>& self, int index) -> int {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferI64 index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<int>& self, int index, int value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferI64 index out of range");
+            self[static_cast<size_t>(index)] = value;
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<int>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<int>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_i64.attr("__cthreads_internal__") = true;
+
+    auto tbuf_bool = py::class_<cthreads::sync::tripple_buffer<bool>>(sync, "TBufferBool")
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<bool>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<bool>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<bool>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<bool>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<bool>& self, int index) -> bool {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferBool index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<bool>& self, int index, bool value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferBool index out of range");
+            self[static_cast<size_t>(index)] = value;
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<bool>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<bool>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_bool.attr("__cthreads_internal__") = true;
+
+    auto tbuf_str = py::class_<cthreads::sync::tripple_buffer<std::string>>(sync, "TBufferStr")
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<std::string>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<std::string>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<std::string>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<std::string>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<std::string>& self, int index) -> std::string {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferStr index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<std::string>& self, int index, const std::string& value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferStr index out of range");
+            self[static_cast<size_t>(index)] = value;
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<std::string>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<std::string>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_str.attr("__cthreads_internal__") = true;
+
+    auto tbuf_list_f64 = py::class_<cthreads::sync::tripple_buffer<std::vector<double>>>(
+        sync, "TBufferListF64"
+    )
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<std::vector<double>>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<std::vector<double>>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<std::vector<double>>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<std::vector<double>>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<std::vector<double>>& self, int index) -> std::vector<double> {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferListF64 index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<std::vector<double>>& self, int index, const std::vector<double>& value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferListF64 index out of range");
+            self[static_cast<size_t>(index)] = value;
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<std::vector<double>>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<std::vector<double>>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_list_f64.attr("__cthreads_internal__") = true;
+
+    auto tbuf_dict = py::class_<cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>>(
+        sync, "TBufferDictStrF64"
+    )
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>& self, int index) -> std::unordered_map<std::string, double> {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferDictStrF64 index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>& self, int index, const std::unordered_map<std::string, double>& value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferDictStrF64 index out of range");
+            self[static_cast<size_t>(index)] = value;
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_dict.attr("__cthreads_internal__") = true;
+
+    // Opaque Python-object slots (bridge type for Threadable objects on host side).
+    // Note: kernel/codegen support for threadable field writes still requires
+    // dedicated compile-time schema handling.
+    auto tbuf_obj = py::class_<cthreads::sync::tripple_buffer<py::object>>(sync, "TBufferObj")
+        .def(py::init<int>(), py::arg("capacity"))
+        .def("publish", &cthreads::sync::tripple_buffer<py::object>::publish)
+        .def("capacity", &cthreads::sync::tripple_buffer<py::object>::capacity)
+        .def("generation", &cthreads::sync::tripple_buffer<py::object>::generation)
+        .def("__len__", [](const cthreads::sync::tripple_buffer<py::object>& self) { return self.capacity(); })
+        .def("__getitem__", [](cthreads::sync::tripple_buffer<py::object>& self, int index) -> py::object {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferObj index out of range");
+            return self[static_cast<size_t>(index)];
+        })
+        .def("__setitem__", [](cthreads::sync::tripple_buffer<py::object>& self, int index, py::object value) {
+            if (index < 0 || index >= self.capacity()) throw py::index_error("TBufferObj index out of range");
+            self[static_cast<size_t>(index)] = std::move(value);
+        })
+        .def("read_copy", [](const cthreads::sync::tripple_buffer<py::object>& self) {
+            auto* data = const_cast<cthreads::sync::tripple_buffer<py::object>&>(self).get_read_cpy();
+            py::list out;
+            const int n = self.capacity();
+            for (int i = 0; i < n; ++i) out.append(data[i]);
+            delete[] data;
+            return out;
+        });
+    tbuf_obj.attr("__cthreads_internal__") = true;
 
     // cthreads.math — helpers not in stdlib math (abs/min/max/clamp/RNG).
     // Mark the *module* with __cthreads_internal__ (pybind bound functions are

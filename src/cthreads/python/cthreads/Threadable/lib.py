@@ -45,6 +45,15 @@ def is_threadable(item: Any) -> bool:
 
     if item in TYPE_WHITELIST:
         return True
+    if getattr(item, "__cthreads_tbuffer__", False):
+        inner = getattr(item, "__cthreads_tbuffer_inner__", None)
+        if inner is None:
+            args = get_args(item)
+            if args:
+                inner = args[0]
+        if inner is not None:
+            is_threadable(inner)
+        return True
     if is_internal_cthreads_type(item):
         return True
     if isinstance(item, type) and getattr(item, "__threadable", False):

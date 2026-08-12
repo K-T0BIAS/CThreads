@@ -10,7 +10,7 @@ import ast
 from dataclasses import dataclass
 
 from ....CONFIG import STORE
-from ....pyTypes import PyDict, PyList, PyThreadable, hint_to_pytype
+from ....pyTypes import PyDict, PyList, PyThreadable, hint_to_pytype, is_tbuffer_pytype
 from ..lib import add_include, include_for
 from .context import TranslateContext
 
@@ -62,9 +62,10 @@ def translate_signature(func_def: ast.FunctionDef, ctx: TranslateContext) -> Sig
         py_type = hint_to_pytype(hint) # convert the hint to a pytype
         ctx.symbols[arg.arg] = py_type
         add_include(ctx.sig_includes, ctx.seen_sig, include_for(py_type)) # add the include for the pytype
-        # Mutables (Threadable / list / dict) bind the pack slot by ref so kernel
-        # edits survive for writeback / sync_state. Primitives stay by value.
-        if isinstance(py_type, (PyThreadable, PyList, PyDict)):
+        # Mutables bind pack slots by ref; triple buffers pass a native pointer.
+        if is_tbuffer_pytype(py_type):
+            params.append(f"{py_type.cpp_name}& {arg.arg}")
+        elif isinstance(py_type, (PyThreadable, PyList, PyDict)):
             params.append(f"{py_type.cpp_name}& {arg.arg}")
         else:
             params.append(f"{py_type.cpp_name} {arg.arg}")

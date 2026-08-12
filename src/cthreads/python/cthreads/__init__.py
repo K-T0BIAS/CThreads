@@ -47,6 +47,15 @@ from .compile import compile
 from .build import build
 from .prepare import prepare, thread
 from .job import Job, wrap_job, sync_state
+from .pyTypes import TBuffer
+from .tbuffer_host import (
+    TBufferHandle,
+    create_tbuffer,
+    destroy_tbuffer,
+    tbuffer_generation,
+    tbuffer_read_copy_ptr,
+    tbuffer_free_read_copy,
+)
 from . import CONFIG
 
 # Kernel-only barrier: importable so ``from cthreads import __sync_state`` works
@@ -100,6 +109,13 @@ __all__ = [
     "Job",
     "sync_state",
     "__sync_state",
+    "TBuffer",
+    "TBufferHandle",
+    "create_tbuffer",
+    "destroy_tbuffer",
+    "tbuffer_generation",
+    "tbuffer_read_copy_ptr",
+    "tbuffer_free_read_copy",
     "sync",
     "math",
     "load_kernels",

@@ -199,6 +199,65 @@ class PyThreadable(PyType):
         return f'#include "{self.cpp_include}"\n'
 
 
+class TBuffer:
+    """
+    Annotation helper for triple-buffer kernel params.
+
+    Use ``TBuffer[Particle]`` in @Thread signatures; codegen emits
+    ``cthreads::sync::tripple_buffer<Particle>``.
+    """
+
+    __cthreads_tbuffer__ = True
+
+    def __class_getitem__(cls, inner: Any) -> type:
+        name = getattr(inner, "__name__", repr(inner))
+        stub = type(f"TBuffer[{name}]", (), {})
+        stub.__cthreads_tbuffer__ = True
+        stub.__cthreads_tbuffer_inner__ = inner
+        return stub
+
+
+class PyTBuffer(PyType):
+    """Maps ``TBuffer[inner]`` to ``cthreads::sync::tripple_buffer<inner>``."""
+
+    inner_type: PyType
+
+    def __init__(self, inner_type: PyType) -> None:
+        self.inner_type = inner_type
+        cpp_inner = inner_type.cpp_name
+        super().__init__(
+            name="TBuffer",
+            cpp_name=f"cthreads::sync::tripple_buffer<{cpp_inner}>",
+            description=f"tripple_buffer<{inner_type.description}>",
+            cpp_include="sync/t_buffer.hpp",
+            needs_include=True,
+        )
+
+    def build_include(self) -> str:
+        return super().build_include() + self.inner_type.build_include()
+
+
+TBUFFER_INTERNAL_NAMES: frozenset[str] = frozenset(
+    {
+        "TBufferF64",
+        "TBufferI64",
+        "TBufferBool",
+        "TBufferStr",
+        "TBufferListF64",
+        "TBufferDictStrF64",
+        "TBufferObj",
+    }
+)
+
+
+def is_tbuffer_pytype(py_type: PyType) -> bool:
+    """True for ``TBuffer[...]`` and fixed ``cthreads.sync.TBuffer*`` types."""
+    return isinstance(py_type, PyTBuffer) or (
+        isinstance(py_type, PyCthreadsInternal)
+        and py_type.name in TBUFFER_INTERNAL_NAMES
+    )
+
+
 # Native sync types shipped in the pybind module (not codegen'd as Threadables).
 # keyed by Python class __name__ as exposed on cthreads.sync
 CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
@@ -214,13 +273,57 @@ CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
         "cpp_name": "cthreads::sync::RWLock",
         "cpp_include": "sync/pyRWLock.hpp",
     },
+    # Fixed-capacity triple buffers (cthreads.sync.TBuffer*).
+    "TBufferF64": {
+        "cpp_name": "cthreads::sync::tripple_buffer<double>",
+        "cpp_include": "sync/t_buffer.hpp",
+    },
+    "TBufferI64": {
+        "cpp_name": "cthreads::sync::tripple_buffer<int>",
+        "cpp_include": "sync/t_buffer.hpp",
+    },
+    "TBufferBool": {
+        "cpp_name": "cthreads::sync::tripple_buffer<bool>",
+        "cpp_include": "sync/t_buffer.hpp",
+    },
+    "TBufferStr": {
+        "cpp_name": "cthreads::sync::tripple_buffer<std::string>",
+        "cpp_include": "sync/t_buffer.hpp",
+        "extra_includes": ("string",),
+    },
+    "TBufferListF64": {
+        "cpp_name": "cthreads::sync::tripple_buffer<std::vector<double>>",
+        "cpp_include": "sync/t_buffer.hpp",
+        "extra_includes": ("vector",),
+    },
+    "TBufferDictStrF64": {
+        "cpp_name": (
+            "cthreads::sync::tripple_buffer<std::unordered_map<std::string, double>>"
+        ),
+        "cpp_include": "sync/t_buffer.hpp",
+        "extra_includes": ("string", "unordered_map"),
+    },
+    "TBufferObj": {
+        "cpp_name": "cthreads::sync::tripple_buffer<py::object>",
+        "cpp_include": "sync/t_buffer.hpp",
+        "extra_includes": ("pybind11/pybind11.h",),
+    },
 }
 
 
 class PyCthreadsInternal(PyType):
     """Maps a marked cthreads.sync type to its existing C++ class + header."""
 
-    def __init__(self, py_name: str, cpp_name: str, cpp_include: str) -> None:
+    extra_includes: tuple[str, ...]
+
+    def __init__(
+        self,
+        py_name: str,
+        cpp_name: str,
+        cpp_include: str,
+        extra_includes: tuple[str, ...] = (),
+    ) -> None:
+        self.extra_includes = extra_includes
         super().__init__(
             name=py_name,
             cpp_name=cpp_name,
@@ -230,7 +333,10 @@ class PyCthreadsInternal(PyType):
         )
 
     def build_include(self) -> str:
-        return f'#include "{self.cpp_include}"\n'
+        out = f'#include "{self.cpp_include}"\n'
+        for inc in self.extra_includes:
+            out += f"#include <{inc}>\n"
+        return out
 
 
 def hint_to_pytype(hint: Any) -> PyType:
@@ -271,6 +377,17 @@ def hint_to_pytype(hint: Any) -> PyType:
     if hint in primitives:
         return primitives[hint]()
 
+    # TBuffer[inner] — codegen uses tripple_buffer<inner_cpp> in the kernel.
+    if getattr(hint, "__cthreads_tbuffer__", False):
+        inner_hint = getattr(hint, "__cthreads_tbuffer_inner__", None)
+        if inner_hint is None:
+            args = get_args(hint)
+            if args:
+                inner_hint = args[0]
+        if inner_hint is None:
+            raise TypeError("TBuffer[...] requires an element type annotation")
+        return PyTBuffer(hint_to_pytype(inner_hint))
+
     # cthreads.sync.* marked with __cthreads_internal__ — link headers, don't generate
     if is_internal_cthreads_type(hint):
         entry = CTHREADS_INTERNAL_TYPES.get(hint.__name__)
@@ -282,6 +399,7 @@ def hint_to_pytype(hint: Any) -> PyType:
             py_name=hint.__name__,
             cpp_name=entry["cpp_name"],
             cpp_include=entry["cpp_include"],
+            extra_includes=tuple(entry.get("extra_includes", ())),
         )
 
     # if the hint points to a @Threadable class it must be resolved to ensure correct includes

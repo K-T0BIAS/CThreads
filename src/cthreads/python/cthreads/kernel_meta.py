@@ -11,25 +11,31 @@ job.result() all use the same shape (primitives, Threadable, list, dict).
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, get_type_hints
 
 from .CONFIG import KERNELS
 from .pyTypes import (
     PyBool,
+    PyCthreadsInternal,
     PyDict,
     PyFloat,
     PyInt,
     PyList,
     PyString,
+    PyTBuffer,
     PyThreadable,
+    TBUFFER_INTERNAL_NAMES,
     hint_to_pytype,
+    is_tbuffer_pytype,
 )
 
 
 @dataclass
 class TypeSchema:
-    kind: str  # int|float|bool|str|threadable|list|dict
+    kind: str  # int|float|bool|str|threadable|list|dict|tbuffer
     cpp_type: str
     # threadable
     type_name: str | None = None
@@ -69,13 +75,17 @@ class TypeSchema:
             d["value"] = (
                 self.value.to_dict(_seen=seen) if self.value else None
             )
+        elif self.kind == "tbuffer":
+            d["inner"] = (
+                self.inner.to_dict(_seen=seen) if self.inner else None
+            )
         return d
 
 
 @dataclass
 class ParamMeta:
     name: str
-    pass_as: str  # value | ref | ptr
+    pass_as: str  # value | ref | ptr | tbuffer
     schema: TypeSchema
 
     @property
@@ -177,6 +187,30 @@ def _primitive_cpp(kind: str) -> str:
     }[kind]
 
 
+def _tbuffer_inner_schema(py_type: PyCthreadsInternal) -> TypeSchema:
+    """Build element schema for fixed ``cthreads.sync.TBuffer*`` classes."""
+    fixed: dict[str, TypeSchema] = {
+        "TBufferF64": TypeSchema("float", "double"),
+        "TBufferI64": TypeSchema("int", "int"),
+        "TBufferBool": TypeSchema("bool", "bool"),
+        "TBufferStr": TypeSchema("str", "std::string"),
+        "TBufferListF64": TypeSchema(
+            "list", "std::vector<double>", inner=TypeSchema("float", "double")
+        ),
+        "TBufferDictStrF64": TypeSchema(
+            "dict",
+            "std::unordered_map<std::string, double>",
+            key=TypeSchema("str", "std::string"),
+            value=TypeSchema("float", "double"),
+        ),
+        "TBufferObj": TypeSchema("str", "py::object"),
+    }
+    inner = fixed.get(py_type.name)
+    if inner is None:
+        raise TypeError(f"unknown fixed TBuffer type {py_type.name!r}")
+    return inner
+
+
 def hint_to_schema(
     hint: Any,
     types: dict[str, type],
@@ -267,6 +301,32 @@ def hint_to_schema(
         schema.fields = fields
         return schema
 
+    if isinstance(py_type, PyTBuffer):
+        from typing import get_args
+
+        inner_hint = getattr(hint, "__cthreads_tbuffer_inner__", None)
+        if inner_hint is None:
+            args = get_args(hint)
+            inner_hint = args[0] if args else None
+        if inner_hint is None:
+            raise TypeError("TBuffer[...] missing inner type for schema")
+        inner = hint_to_schema(
+            inner_hint, types, _completed=completed, _stack=stack
+        )
+        return TypeSchema(
+            "tbuffer",
+            f"cthreads::sync::tripple_buffer<{inner.cpp_type}>",
+            inner=inner,
+        )
+
+    if isinstance(py_type, PyCthreadsInternal) and py_type.name in TBUFFER_INTERNAL_NAMES:
+        inner = _tbuffer_inner_schema(py_type)
+        return TypeSchema(
+            "tbuffer",
+            py_type.cpp_name,
+            inner=inner,
+        )
+
     raise TypeError(f"unsupported dispatch type {hint!r}")
 
 
@@ -316,12 +376,12 @@ def build_kernel_meta(
             )
         hint = hints[name]
         py_type = hint_to_pytype(hint)
-        # Match codegen signatures: mutables bind pack slots by ref.
-        pass_as = (
-            "ref"
-            if isinstance(py_type, (PyThreadable, PyList, PyDict))
-            else "value"
-        )
+        if is_tbuffer_pytype(py_type):
+            pass_as = "tbuffer"
+        elif isinstance(py_type, (PyThreadable, PyList, PyDict)):
+            pass_as = "ref"
+        else:
+            pass_as = "value"
         params.append(
             _param_from_hint(
                 name, hint, pass_as=pass_as, types=types, completed=completed
@@ -596,6 +656,16 @@ def _emit_schema_accessors_fixed(
         )
         return
 
+    if schema.kind == "tbuffer":
+        lines.append(
+            f"CTHREADS_API void {symbol}__set_{prefix}_ptr(void* p{extra}, void* buf) {{"
+        )
+        lines.append(
+            f"    static_cast<{struct}*>(p)->{prefix} = static_cast<{schema.cpp_type}*>(buf);"
+        )
+        lines.append("}")
+        return
+
     raise TypeError(f"cannot emit accessors for kind {schema.kind!r}")
 
 
@@ -608,7 +678,10 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
 
     lines.append(f"struct {struct} {{")
     for i, p in enumerate(meta.params):
-        lines.append(f"    {p.cpp_type} a{i};")
+        if p.schema.kind == "tbuffer":
+            lines.append(f"    {p.schema.cpp_type}* a{i};")
+        else:
+            lines.append(f"    {p.cpp_type} a{i};")
     if meta.return_schema is not None:
         lines.append(f"    {meta.return_schema.cpp_type} ret;")
     lines.append("};")
@@ -637,6 +710,8 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
             walk_needs(schema.key)
             walk_needs(schema.value)
         elif schema.kind == "list":
+            walk_needs(schema.inner)
+        elif schema.kind == "tbuffer":
             walk_needs(schema.inner)
         elif schema.kind == "threadable":
             for _, fs in schema.fields:
@@ -678,6 +753,8 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
         slot = f"a->a{i}"
         if p.pass_as == "ptr":
             call_args.append(f"&{slot}")
+        elif p.pass_as == "tbuffer":
+            call_args.append(f"*{slot}")
         elif p.pass_as == "ref":
             call_args.append(slot)
         else:
@@ -710,6 +787,161 @@ def emit_trampoline_decls(meta: KernelMeta) -> str:
         f"CTHREADS_API void {meta.call_symbol}(void* p);",
     ]
     return "\n".join(lines) + "\n"
+
+
+def collect_tbuffer_threadables() -> set[str]:
+    """Threadable type names used in ``TBuffer[Threadable]`` kernel params."""
+    names: set[str] = set()
+    for meta in KERNELS.values():
+        for p in meta.params:
+            if p.schema.kind != "tbuffer" or p.schema.inner is None:
+                continue
+            if p.schema.inner.kind == "threadable" and p.schema.inner.type_name:
+                names.add(p.schema.inner.type_name)
+    return names
+
+
+def emit_tbuffer_runtime_files(
+    threadable_names: set[str],
+    thread_dir: Path,
+) -> tuple[str, str]:
+    """
+    Emit ``cthreads_tbuffer.{hpp,cpp}`` for opaque host allocation.
+
+    ``_ext`` passes ``void*``; kernels cast to ``tripple_buffer<T>&``.
+    """
+    from .CONFIG import STORE
+
+    thread_dir = Path(thread_dir).resolve()
+    sorted_names = sorted(threadable_names)
+
+    includes: list[str] = []
+    create_cases: list[str] = []
+    destroy_cases: list[str] = []
+    generation_cases: list[str] = []
+    read_cases: list[str] = []
+    free_read_cases: list[str] = []
+
+    for name in sorted_names:
+        if name not in STORE:
+            raise RuntimeError(
+                f"cthreads: TBuffer[{name}] used in a kernel but {name!r} "
+                "is missing from STORE (compile @Threadable first)"
+            )
+        hpp = Path(STORE[name]).resolve()
+        rel = os.path.relpath(hpp, thread_dir).replace("\\", "/")
+        includes.append(f'#include "{rel}"')
+        create_cases.append(
+            f'    if (name == "{name}") {{\n'
+            f"        return new cthreads::sync::tripple_buffer<{name}>(capacity);\n"
+            f"    }}"
+        )
+        destroy_cases.append(
+            f'    if (name == "{name}") {{\n'
+            f"        delete static_cast<cthreads::sync::tripple_buffer<{name}>*>(ptr);\n"
+            f"        return;\n"
+            f"    }}"
+        )
+        generation_cases.append(
+            f'    if (name == "{name}") {{\n'
+            f"        return static_cast<cthreads::sync::tripple_buffer<{name}>*>(ptr)->generation();\n"
+            f"    }}"
+        )
+        read_cases.append(
+            f'    if (name == "{name}") {{\n'
+            f"        return static_cast<cthreads::sync::tripple_buffer<{name}>*>(ptr)->get_read_cpy();\n"
+            f"    }}"
+        )
+        free_read_cases.append(
+            f'    if (name == "{name}") {{\n'
+            f"        delete[] static_cast<{name}*>(copy);\n"
+            f"        return;\n"
+            f"    }}"
+        )
+
+    hpp_src = (
+        "#pragma once\n\n"
+        '#include "cthreads_export.hpp"\n\n'
+        "CTHREADS_API void* cthreads_create_tbuffer(const char* type_name, int capacity);\n"
+        "CTHREADS_API void cthreads_destroy_tbuffer(const char* type_name, void* ptr);\n"
+        "CTHREADS_API int cthreads_tbuffer_generation(const char* type_name, void* ptr);\n"
+        "CTHREADS_API void* cthreads_tbuffer_read_copy(const char* type_name, void* ptr);\n"
+        "CTHREADS_API void cthreads_tbuffer_free_read_copy(const char* type_name, void* copy);\n"
+    )
+
+    cpp_src = (
+        '#include "cthreads_tbuffer.hpp"\n\n'
+        '#include "sync/t_buffer.hpp"\n\n'
+        + "\n".join(includes)
+        + "\n\n#include <string>\n\n"
+        "CTHREADS_API void* cthreads_create_tbuffer(const char* type_name, int capacity) {\n"
+        "    if (!type_name || capacity <= 0) {\n"
+        "        return nullptr;\n"
+        "    }\n"
+        "    const std::string name(type_name);\n"
+        + "\n".join(create_cases)
+        + "\n    return nullptr;\n"
+        "}\n\n"
+        "CTHREADS_API void cthreads_destroy_tbuffer(const char* type_name, void* ptr) {\n"
+        "    if (!type_name || !ptr) {\n"
+        "        return;\n"
+        "    }\n"
+        "    const std::string name(type_name);\n"
+        + "\n".join(destroy_cases)
+        + "\n}\n\n"
+        "CTHREADS_API int cthreads_tbuffer_generation(const char* type_name, void* ptr) {\n"
+        "    if (!type_name || !ptr) {\n"
+        "        return 0;\n"
+        "    }\n"
+        "    const std::string name(type_name);\n"
+        + "\n".join(generation_cases)
+        + "\n    return 0;\n"
+        "}\n\n"
+        "CTHREADS_API void* cthreads_tbuffer_read_copy(const char* type_name, void* ptr) {\n"
+        "    if (!type_name || !ptr) {\n"
+        "        return nullptr;\n"
+        "    }\n"
+        "    const std::string name(type_name);\n"
+        + "\n".join(read_cases)
+        + "\n    return nullptr;\n"
+        "}\n\n"
+        "CTHREADS_API void cthreads_tbuffer_free_read_copy(const char* type_name, void* copy) {\n"
+        "    if (!type_name || !copy) {\n"
+        "        return;\n"
+        "    }\n"
+        "    const std::string name(type_name);\n"
+        + "\n".join(free_read_cases)
+        + "\n}\n"
+    )
+
+    return hpp_src, cpp_src
+
+
+def write_tbuffer_runtime(root: Path) -> bool:
+    """
+    Write or remove ``__Thread__/cthreads_tbuffer.*`` for the project.
+
+    Returns True if allocator sources exist after this call.
+    """
+    from .cache import write_if_changed
+
+    root = Path(root).resolve()
+    thread_dir = root / "__Thread__"
+    thread_dir.mkdir(parents=True, exist_ok=True)
+    hpp_path = thread_dir / "cthreads_tbuffer.hpp"
+    cpp_path = thread_dir / "cthreads_tbuffer.cpp"
+
+    names = collect_tbuffer_threadables()
+    if not names:
+        for path in (hpp_path, cpp_path):
+            if path.is_file():
+                path.unlink()
+        return False
+
+    hpp_src, cpp_src = emit_tbuffer_runtime_files(names, thread_dir)
+    write_if_changed(hpp_path, hpp_src)
+    write_if_changed(cpp_path, cpp_src)
+    return True
 
 
 # Back-compat for tests that still import FieldMeta

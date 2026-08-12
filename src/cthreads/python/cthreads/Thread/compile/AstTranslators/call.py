@@ -17,7 +17,8 @@ from ....pyOps import is_builtin_call
 from ..lib import add_include
 from ..mathLibTranslators import CMATH_INCLUDE, resolve_math_call
 from ..pythonContainerLibTranslators import resolve_container_op
-from ..syncBindingTranslators import resolve_sync_op
+from ..syncBindingTranslators import resolve_sync_op, resolve_tbuffer_op
+from ....pyTypes import is_tbuffer_pytype
 from .context import TranslateContext
 
 
@@ -46,8 +47,14 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
                 f"Thread function {ctx.func_name}: "
                 f"len() expects 1 arg, got {len(node.args)}"
             )
+        arg_node = node.args[0]
+        if isinstance(arg_node, ast.Name):
+            ty = ctx.symbols.get(arg_node.id)
+            if ty is not None and is_tbuffer_pytype(ty):
+                arg = translate_expr(arg_node, ctx)
+                return f"({arg}).capacity()"
         # translate the argument
-        arg = translate_expr(node.args[0], ctx)
+        arg = translate_expr(arg_node, ctx)
         # return the translated argument wrapped in parentheses and size()
         # since we use std::vector<T> we can use size() to get the length of the container
         return f"({arg}).size()"
@@ -81,6 +88,13 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
         recv = translate_expr(node.func.value, ctx)
         args = [translate_expr(a, ctx) for a in node.args]
         return container_op.emit(recv, args)
+
+    tbuf_op = resolve_tbuffer_op(node, ctx)
+    if tbuf_op is not None:
+        assert isinstance(node.func, ast.Attribute)
+        recv = translate_expr(node.func.value, ctx)
+        args = [translate_expr(a, ctx) for a in node.args]
+        return tbuf_op.emit(recv, args)
 
     # cthreads.sync.Lock / Event / RWLock methods on a typed Name receiver.
     sync_op = resolve_sync_op(node, ctx)
