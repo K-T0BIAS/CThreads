@@ -31,16 +31,55 @@ if(NOT pybind11_FOUND)
 endif()
 
 # --- Extension module: import cthreads._ext ----------------------------------
+set(_CTHREADS_LINALG_SOURCES
+    impl/linalg/array.cpp
+    impl/linalg/tiling.cpp
+)
+
 pybind11_add_module(_ext MODULE
     bindings/module.cpp
+    ${_CTHREADS_LINALG_SOURCES}
 )
 
 target_include_directories(_ext PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/headers
 )
 
+# Enable AVX2/FMA so Array float/double kernels hit the SIMD path on supported CPUs.
+if(MSVC)
+    target_compile_options(_ext PRIVATE /arch:AVX2)
+else()
+    target_compile_options(_ext PRIVATE -mavx2 -mfma)
+endif()
+
 if(UNIX AND NOT APPLE)
     target_link_libraries(_ext PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# --- Standalone linalg micro-bench (dot + matmul, light/medium/heavy) --------
+set(_CTHREADS_BENCH_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../demo/bench/cpp/linalg_bench.cpp"
+)
+if(EXISTS "${_CTHREADS_BENCH_SRC}")
+    add_executable(linalg_bench
+        ${_CTHREADS_BENCH_SRC}
+        ${_CTHREADS_LINALG_SOURCES}
+    )
+    target_include_directories(linalg_bench PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/headers
+    )
+    if(MSVC)
+        target_compile_options(linalg_bench PRIVATE /arch:AVX2 /O2)
+    else()
+        target_compile_options(linalg_bench PRIVATE -mavx2 -mfma -O3)
+    endif()
+    set_target_properties(linalg_bench PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../../demo/bench/cpp"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/../../../demo/bench/cpp"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/../../../demo/bench/cpp"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_CURRENT_SOURCE_DIR}/../../../demo/bench/cpp"
+    )
+    message(STATUS "linalg_bench: ${_CTHREADS_BENCH_SRC}")
 endif()
 
 # Python package dir (sibling of this cpp/ tree). Never use cpp/ as output/build.

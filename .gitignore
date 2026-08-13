@@ -39,6 +39,8 @@ src/cthreads/cpp/MinSizeRel/
 src/cthreads/cpp/x64/
 src/cthreads/cpp/build/
 src/cthreads/cpp/src/
+*.obj
 
 #temp ignores
 docs/
+demo/
