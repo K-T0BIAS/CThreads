@@ -180,6 +180,10 @@ namespace cthreads::linalg {
             static void _fast_sub(Array& lhs, const Array& rhs);
             static void _fast_mul(Array& lhs, const Array& rhs);
             static void _fast_div(Array& lhs, const Array& rhs);
+            static void _fast_add(Array& lhs, T value);
+            static void _fast_sub(Array& lhs, T value);
+            static void _fast_mul(Array& lhs, T value);
+            static void _fast_div(Array& lhs, T value);
             static void _fast_neg(Array& lhs);
 
 #pragma endregion math operations
