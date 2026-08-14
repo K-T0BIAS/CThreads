@@ -132,6 +132,7 @@ namespace cthreads::linalg {
 
             size_t ndim() const { return this->_shape.size(); }
 
+
 #pragma endregion helpers
         };
 }

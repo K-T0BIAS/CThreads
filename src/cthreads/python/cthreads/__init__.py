@@ -78,6 +78,7 @@ except ImportError:
 if _ext is not None:
     sync = _ext.sync # get the sync module
     math = getattr(_ext, "math", None)  # older wheels may lack math
+    linalg = getattr(_ext, "linalg", None)
     load_kernels = _ext.load_kernels # get the load_kernels function
     unload_kernels = _ext.unload_kernels # get the unload_kernels function
     host_os = _ext.host_os # get the host_os function
@@ -90,6 +91,7 @@ if _ext is not None:
 else:
     sync = None  # type: ignore[assignment,misc]
     math = None  # type: ignore[assignment]
+    linalg = None  # type: ignore[assignment]
     load_kernels = None  # type: ignore[assignment,misc]
     unload_kernels = None  # type: ignore[assignment,misc]
     host_os = None  # type: ignore[assignment,misc]
@@ -118,6 +120,7 @@ __all__ = [
     "tbuffer_free_read_copy",
     "sync",
     "math",
+    "linalg",
     "load_kernels",
     "unload_kernels",
     "kernel_path",

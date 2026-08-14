@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 
 namespace cthreads::linalg {
@@ -77,5 +78,6 @@ std::vector<Tile<T>> Tile<T>::tiles(T* data, const Shape& shape) {
 template struct Tile<float>;
 template struct Tile<double>;
 template struct Tile<int>;
+template struct Tile<uint8_t>;
 
 } // namespace cthreads::linalg

@@ -15,6 +15,7 @@
 #include "../headers/sync/pyRWLock.hpp"
 #include "../headers/sync/syncState.hpp"
 #include "../headers/sync/t_buffer.hpp"
+#include "linalg.hpp"
 
 #include <cstdint>
 #include <atomic>
@@ -898,4 +899,6 @@ PYBIND11_MODULE(_ext, m) {
     );
 
     math.def("seed", &cthreads::math::seed, py::arg("s"));
+
+    bind_linalg(m);
 }
