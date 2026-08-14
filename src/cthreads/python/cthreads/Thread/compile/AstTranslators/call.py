@@ -3,9 +3,9 @@ Copyright (c) 2026 Tobias Karusseit
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 
-Translate `ast.Call` - builtins + list/dict + sync methods + math.* / cthreads.math.*.
+Translate `ast.Call` - builtins + list/dict + sync/linalg methods + math.* / cthreads.math.* / cthreads.linalg.*.
 
-Python:  len(xs)   __sync_state()   xs.append(v)   lock.acquire()   math.sqrt(x)
+Python:  len(xs)   __sync_state()   xs.append(v)   lock.acquire()   a.matmul(b)   math.sqrt(x)
 C++:     (xs).size()  cthreads::detail::__sync_state()  (xs).push_back(v) ...
 """
 
@@ -15,6 +15,7 @@ import ast
 
 from ....pyOps import is_builtin_call
 from ..lib import add_include
+from ..linalgTranslations import resolve_linalg_ctor, resolve_linalg_method
 from ..mathLibTranslators import CMATH_INCLUDE, resolve_math_call
 from ..pythonContainerLibTranslators import resolve_container_op
 from ..syncBindingTranslators import resolve_sync_op, resolve_tbuffer_op
@@ -110,13 +111,41 @@ def translate(node: ast.Call, ctx: TranslateContext) -> str:
         args = [translate_expr(a, ctx) for a in node.args]
         return sync_op.emit(recv, args)
 
+    linalg_method = resolve_linalg_method(node, ctx)
+    if linalg_method is not None:
+        assert isinstance(node.func, ast.Attribute)
+        if linalg_method.cpp_include:
+            add_include(
+                ctx.body_includes,
+                ctx.seen_body,
+                f'#include "{linalg_method.cpp_include}"\n',
+            )
+        recv = translate_expr(node.func.value, ctx)
+        args = [translate_expr(a, ctx) for a in node.args]
+        return linalg_method.emit(recv, args)
+
+    linalg_ctor = resolve_linalg_ctor(node, ctx)
+    if linalg_ctor is not None:
+        add_include(
+            ctx.body_includes,
+            ctx.seen_body,
+            f'#include "{linalg_ctor.cpp_include}"\n',
+        )
+        for inc in linalg_ctor.extra_includes:
+            add_include(ctx.body_includes, ctx.seen_body, f"#include <{inc}>\n")
+        args = [translate_expr(a, ctx) for a in node.args]
+        if not args:
+            return f"{linalg_ctor.cpp_type}()"
+        return f"{linalg_ctor.cpp_type}({', '.join(args)})"
+
     # resolve the math call
     op = resolve_math_call(node, ctx)
     if op is None: # unsupported math call
         raise TypeError(
             f"Thread function {ctx.func_name}: "
             f"unsupported call (only whitelisted builtins / "
-            f"__sync_state / list|dict|sync methods / math.* / cthreads.math.*)"
+            f"__sync_state / list|dict|sync|linalg methods / "
+            f"math.* / cthreads.math.* / cthreads.linalg.*)"
         )
 
     # add the include for the math call

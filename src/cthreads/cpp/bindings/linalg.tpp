@@ -355,13 +355,15 @@ inline void bind_array(py::module_& m, const char* name) {
             .def("_dot", &Arr::_dot)
             .def("_cross", &Arr::_cross);
     }
+    cls.attr("__cthreads_internal__") = true;
 }
 
 inline void bind_linalg(py::module_& parent) {
     py::module_ m = parent.def_submodule("linalg", "ND arrays (C++ linalg::Array)");
     m.attr("__cthreads_internal__") = true;
 
-    py::class_<cthreads::linalg::Shape>(m, "Shape")
+    auto shape_cls = py::class_<cthreads::linalg::Shape>(m, "Shape");
+    shape_cls
         .def(py::init<const std::vector<size_t>&>(), py::arg("dims"))
         .def(py::init<size_t>(), py::arg("dim"))
         .def("__len__", &cthreads::linalg::Shape::size)
@@ -389,8 +391,10 @@ inline void bind_linalg(py::module_& parent) {
             os << "])";
             return os.str();
         });
+    shape_cls.attr("__cthreads_internal__") = true;
 
-    py::class_<cthreads::linalg::Slice>(m, "Slice")
+    auto slice_cls = py::class_<cthreads::linalg::Slice>(m, "Slice");
+    slice_cls
         .def(py::init<>())
         .def(py::init<size_t>(), py::arg("stop"))
         .def(py::init<size_t, size_t, size_t>(),
@@ -409,6 +413,7 @@ inline void bind_linalg(py::module_& parent) {
             os << ", " << s.step << ")";
             return os.str();
         });
+    slice_cls.attr("__cthreads_internal__") = true;
 
     bind_array<uint8_t>(m, "ArrayBool");
     bind_array<float>(m, "ArrayF32");

@@ -121,4 +121,39 @@ def test_translate_expr_dispatch_and_unsupported():
     ctx = make_ctx(symbols={"a": PyInt()})
     assert translate_expr(parse_expr("a + 1"), ctx) == "(a + 1)"
     with pytest.raises(TypeError, match="unsupported expression"):
-        translate_expr(parse_expr("[1, 2]"), ctx)
+        translate_expr(parse_expr("{1: 2}"), ctx)
+
+
+def test_list_literal():
+    from cthreads.Thread.compile.AstTranslators import listLiteral
+
+    ctx = make_ctx(symbols={"x": PyInt(), "y": PyInt()})
+    assert listLiteral.translate(parse_expr("[1, 2, 3]"), ctx) == (
+        "std::vector<int>{1, 2, 3}"
+    )
+    assert listLiteral.translate(parse_expr("[x, y]"), ctx) == (
+        "std::vector<int>{x, y}"
+    )
+    assert listLiteral.translate(parse_expr("[]"), ctx) == "{}"
+    assert listLiteral.translate(parse_expr("[[1, 2], [3, 4]]"), ctx) == (
+        "std::vector<std::vector<int>>{std::vector<int>{1, 2}, std::vector<int>{3, 4}}"
+    )
+    assert any("vector" in line for line in ctx.body_includes)
+
+    sctx = make_ctx()
+    assert listLiteral.translate(parse_expr('["a", "b"]'), sctx) == (
+        'std::vector<std::string>{"a", "b"}'
+    )
+    assert any("string" in line for line in sctx.body_includes)
+
+    with pytest.raises(TypeError, match="mixed list element types"):
+        listLiteral.translate(parse_expr("[1, 2.0]"), ctx)
+    with pytest.raises(TypeError, match="starred"):
+        listLiteral.translate(parse_expr("[*x]"), ctx)
+    with pytest.raises(TypeError, match="cannot infer"):
+        listLiteral.translate(parse_expr("[x + y]"), ctx)
+
+    # nested empty sibling still typed from the non-empty row
+    assert translate_expr(parse_expr("[[1], []]"), ctx) == (
+        "std::vector<std::vector<int>>{std::vector<int>{1}, {}}"
+    )

@@ -6,9 +6,9 @@ LICENSE file in the root directory of this source tree.
 Detect list/dict method calls for lowering.
 
 Unlike math (resolved via `ctx.fn.__globals__`), container ops are
-`recv.method(...)` on a typed local. Receiver must be a bare `Name`
-present in `ctx.symbols` as `PyList` / `PyDict` (same limit as
-`for x in xs`).
+`recv.method(...)` on a typed receiver (`PyList` / `PyDict`). The receiver
+is typed by `typeof` (a name in `ctx.symbols`, a Threadable field, or a
+list subscript).
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Optional
 
 from ....pyTypes import PyDict, PyList
 from ..AstTranslators.context import TranslateContext
+from ..AstTranslators.typeof import expr_src, typeof
 from .containerOps import DICT_METHODS, LIST_METHODS, ContainerOp
 
 
@@ -42,18 +43,9 @@ def resolve_container_op(node: ast.AST, ctx: TranslateContext) -> Optional[Conta
         return None
     if not isinstance(node.func, ast.Attribute):
         return None
-    if node.keywords:
-        raise TypeError(
-            f"Thread function {ctx.func_name}: "
-            "container method keyword args are not supported"
-        )
 
     recv = node.func.value
-    # Start with Name-only receivers (xs.append); self.items.append later.
-    if not isinstance(recv, ast.Name):
-        return None
-
-    ty = ctx.symbols.get(recv.id)
+    ty = typeof(recv, ctx)
     if isinstance(ty, PyList):
         table = LIST_METHODS
         kind = "list"
@@ -62,13 +54,18 @@ def resolve_container_op(node: ast.AST, ctx: TranslateContext) -> Optional[Conta
         kind = "dict"
     else:
         return None
+    if node.keywords:
+        raise TypeError(
+            f"Thread function {ctx.func_name}: "
+            "container method keyword args are not supported"
+        )
 
     name = node.func.attr
     op = table.get(name)
     if op is None:
         raise TypeError(
             f"Thread function {ctx.func_name}: "
-            f"unsupported {kind} method {name!r} on {recv.id!r}"
+            f"unsupported {kind} method {name!r} on {expr_src(recv)!r}"
         )
 
     n = len(node.args)

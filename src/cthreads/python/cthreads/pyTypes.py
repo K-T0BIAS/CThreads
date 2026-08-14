@@ -258,8 +258,8 @@ def is_tbuffer_pytype(py_type: PyType) -> bool:
     )
 
 
-# Native sync types shipped in the pybind module (not codegen'd as Threadables).
-# keyed by Python class __name__ as exposed on cthreads.sync
+# Native types shipped in the pybind module (not codegen'd as Threadables).
+# keyed by Python class __name__ as exposed on cthreads.sync / cthreads.linalg
 CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
     "Lock": {
         "cpp_name": "cthreads::sync::Lock",
@@ -308,11 +308,37 @@ CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
         "cpp_include": "sync/t_buffer.hpp",
         "extra_includes": ("pybind11/pybind11.h",),
     },
+    # cthreads.linalg.* (Array / Shape / Slice).
+    "ArrayF32": {
+        "cpp_name": "cthreads::linalg::Array<float>",
+        "cpp_include": "linalg/array.hpp",
+    },
+    "ArrayF64": {
+        "cpp_name": "cthreads::linalg::Array<double>",
+        "cpp_include": "linalg/array.hpp",
+    },
+    "ArrayI32": {
+        "cpp_name": "cthreads::linalg::Array<int>",
+        "cpp_include": "linalg/array.hpp",
+    },
+    "ArrayBool": {
+        "cpp_name": "cthreads::linalg::Array<uint8_t>",
+        "cpp_include": "linalg/array.hpp",
+        "extra_includes": ("cstdint",),
+    },
+    "Shape": {
+        "cpp_name": "cthreads::linalg::Shape",
+        "cpp_include": "linalg/shape.hpp",
+    },
+    "Slice": {
+        "cpp_name": "cthreads::linalg::Slice",
+        "cpp_include": "linalg/slice.hpp",
+    },
 }
 
 
 class PyCthreadsInternal(PyType):
-    """Maps a marked cthreads.sync type to its existing C++ class + header."""
+    """Maps a marked cthreads.sync / cthreads.linalg type to its C++ class + header."""
 
     extra_includes: tuple[str, ...]
 

@@ -10,7 +10,8 @@ namespace cthreads::linalg {
         private:
             std::vector<size_t> _shape;
         public:
-            Shape(const std::vector<size_t>& shape) : _shape(shape) {}
+            template<typename I>
+            Shape(const std::vector<I>& shape) : _shape(shape.begin(), shape.end()) {}
             Shape(size_t value) : _shape({value}) {}
 
             ~Shape() = default;

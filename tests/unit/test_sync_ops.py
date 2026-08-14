@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cthreads.pyTypes import PyCthreadsInternal, PyFloat, PyInt
+from cthreads.pyTypes import PyCthreadsInternal, PyFloat, PyInt, PyThreadable
 from cthreads.Thread.compile.AstTranslators import call, exprStmt
 from cthreads.Thread.compile.syncBindingTranslators import (
     EVENT_METHODS,
@@ -13,7 +13,7 @@ from cthreads.Thread.compile.syncBindingTranslators import (
     resolve_sync_op,
 )
 from cthreads.Thread.compile.syncBindingTranslators.is_sync import is_sync_op
-from helpers import make_ctx, parse_expr, parse_stmt
+from helpers import make_ctx, parse_expr, parse_stmt, registered_threadable
 
 
 def _lock_ty() -> PyCthreadsInternal:
@@ -115,6 +115,27 @@ def test_expr_stmt_lock_acquire():
     assert lines == ["    (lock).acquire();"]
 
 
-def test_attribute_receiver_not_supported_yet():
+def test_attribute_receiver_uses_threadable_field():
+    Lock = type("Lock", (), {"__cthreads_internal__": True})
+    Holder = type(
+        "Holder",
+        (),
+        {"__threadable": True, "__annotations__": {"lock": Lock}},
+    )
+    with registered_threadable(Holder):
+        ctx = make_ctx(
+            owner_name="Holder",
+            symbols={"self": PyThreadable("Holder", "x")},
+        )
+        assert (
+            resolve_sync_op(parse_expr("self.lock.acquire()"), ctx)
+            is LOCK_METHODS["acquire"]
+        )
+        assert call.translate(parse_expr("self.lock.acquire()"), ctx) == (
+            "(this->lock).acquire()"
+        )
+
+
+def test_untyped_attribute_receiver_is_none():
     ctx = make_ctx(symbols={"t": PyFloat()})
     assert resolve_sync_op(parse_expr("obj.lock.acquire()"), ctx) is None

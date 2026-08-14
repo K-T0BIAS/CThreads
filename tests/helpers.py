@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import ast
 import textwrap
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from cthreads.Thread.compile.AstTranslators.context import TranslateContext
 
@@ -58,3 +59,15 @@ def make_threadable_type(name: str = "Particle") -> type:
             "__annotations__": {"x": float, "y": float, "velocity": float},
         },
     )
+
+
+@contextmanager
+def registered_threadable(cls: type) -> Iterator[type]:
+    """Put ``cls`` on REGISTRY for the duration of a test (typeof field lookup)."""
+    from cthreads.CONFIG import REGISTRY
+
+    REGISTRY.register_threadable(cls)
+    try:
+        yield cls
+    finally:
+        REGISTRY.threadables.pop(cls.__name__, None)

@@ -13,6 +13,9 @@ def test_exported_on_cthreads():
 
 def test_marked_internal():
     assert getattr(linalg, "__cthreads_internal__", False) is True
+    for name in ("Shape", "Slice", "ArrayBool", "ArrayF32", "ArrayF64", "ArrayI32"):
+        cls = getattr(linalg, name)
+        assert getattr(cls, "__cthreads_internal__", False) is True, name
 
 
 def test_required_types_exist():

@@ -27,6 +27,12 @@ def test_ann_assign_decl_and_init():
     ctx2 = make_ctx(symbols={"a": PyInt()})
     lines = annAssign.translate(parse_stmt("b: int = a + 10"), ctx2)
     assert lines == ["    int b = (a + 10);"]
+    ctx3 = make_ctx()
+    lines = annAssign.translate(parse_stmt("xs: list[int] = [1, 2, 3]"), ctx3)
+    assert lines == ["    std::vector<int> xs = std::vector<int>{1, 2, 3};"]
+    ctx4 = make_ctx()
+    lines = annAssign.translate(parse_stmt("ys: list[int] = []"), ctx4)
+    assert lines == ["    std::vector<int> ys = {};"]
 
 
 def test_ann_assign_redeclaration():

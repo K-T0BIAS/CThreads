@@ -91,3 +91,46 @@ def test_hint_to_pytype_tbuffer_internal():
     py_list = hint_to_pytype(TBufferListF64)
     assert "std::vector<double>" in py_list.cpp_name
     assert "#include <vector>" in py_list.build_include()
+
+
+def test_hint_to_pytype_linalg_internal():
+    class ArrayF32:
+        __cthreads_internal__ = True
+
+    py = hint_to_pytype(ArrayF32)
+    assert isinstance(py, PyCthreadsInternal)
+    assert py.cpp_name == "cthreads::linalg::Array<float>"
+    inc = py.build_include()
+    assert '#include "linalg/array.hpp"' in inc
+
+    class ArrayBool:
+        __cthreads_internal__ = True
+
+    py_bool = hint_to_pytype(ArrayBool)
+    assert py_bool.cpp_name == "cthreads::linalg::Array<uint8_t>"
+    assert "#include <cstdint>" in py_bool.build_include()
+
+    class Shape:
+        __cthreads_internal__ = True
+
+    py_shape = hint_to_pytype(Shape)
+    assert py_shape.cpp_name == "cthreads::linalg::Shape"
+    assert '#include "linalg/shape.hpp"' in py_shape.build_include()
+
+    class Slice:
+        __cthreads_internal__ = True
+
+    py_slice = hint_to_pytype(Slice)
+    assert py_slice.cpp_name == "cthreads::linalg::Slice"
+    assert '#include "linalg/slice.hpp"' in py_slice.build_include()
+
+
+def test_hint_to_pytype_live_linalg_classes():
+    from cthreads import linalg
+
+    if linalg is None:
+        pytest.skip("cthreads.linalg not built")
+    py = hint_to_pytype(linalg.ArrayF32)
+    assert isinstance(py, PyCthreadsInternal)
+    assert py.cpp_name == "cthreads::linalg::Array<float>"
+    assert hint_to_pytype(linalg.Shape).cpp_name == "cthreads::linalg::Shape"

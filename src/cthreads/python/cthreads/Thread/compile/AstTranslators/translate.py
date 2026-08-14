@@ -53,6 +53,7 @@ from . import (
     exprStmt,
     forStmt,
     ifStmt,
+    listLiteral,
     name,
     passStmt,
     returnStmt,
@@ -74,6 +75,7 @@ EXPR_TRANSLATORS: dict[type, ExprTranslator] = {
     ast.Compare: compare.translate,
     ast.BoolOp: boolOp.translate,
     ast.Call: call.translate,
+    ast.List: listLiteral.translate,
 }
 
 # dict of the translators for the different types of statements

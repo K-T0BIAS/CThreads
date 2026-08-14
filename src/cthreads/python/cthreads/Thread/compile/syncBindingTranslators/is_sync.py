@@ -5,8 +5,9 @@ LICENSE file in the root directory of this source tree.
 
 Detect cthreads.sync method calls for lowering.
 
-Like container ops: `recv.method(...)` on a typed local. Receiver must be a
-bare `Name` in `ctx.symbols` as `PyCthreadsInternal` (Lock / Event / RWLock).
+Like container ops: `recv.method(...)` on a typed receiver (`PyCthreadsInternal`
+Lock / Event / RWLock). The receiver is typed by `typeof` (a name in
+`ctx.symbols` or a Threadable field).
 """
 
 import ast
@@ -14,6 +15,7 @@ from typing import Optional
 
 from ....pyTypes import PyCthreadsInternal
 from ..AstTranslators.context import TranslateContext
+from ..AstTranslators.typeof import expr_src, typeof
 from .syncOps import SYNC_METHODS, SyncOp
 
 
@@ -37,30 +39,27 @@ def resolve_sync_op(node: ast.AST, ctx: TranslateContext) -> Optional[SyncOp]:
         return None
     if not isinstance(node.func, ast.Attribute):
         return None
-    if node.keywords:
-        raise TypeError(
-            f"Thread function {ctx.func_name}: "
-            "sync method keyword args are not supported"
-        )
 
     recv = node.func.value
-    if not isinstance(recv, ast.Name):
-        return None
-
-    ty = ctx.symbols.get(recv.id)
+    ty = typeof(recv, ctx)
     if not isinstance(ty, PyCthreadsInternal):
         return None
 
     table = SYNC_METHODS.get(ty.name)
     if table is None:
         return None
+    if node.keywords:
+        raise TypeError(
+            f"Thread function {ctx.func_name}: "
+            "sync method keyword args are not supported"
+        )
 
     name = node.func.attr
     op = table.get(name)
     if op is None:
         raise TypeError(
             f"Thread function {ctx.func_name}: "
-            f"unsupported {ty.name} method {name!r} on {recv.id!r}"
+            f"unsupported {ty.name} method {name!r} on {expr_src(recv)!r}"
         )
 
     n = len(node.args)

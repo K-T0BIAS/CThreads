@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cthreads.pyTypes import PyDict, PyInt, PyList, PyString
+from cthreads.pyTypes import PyDict, PyInt, PyList, PyString, PyThreadable
 from cthreads.Thread.compile.AstTranslators import call, exprStmt
 from cthreads.Thread.compile.pythonContainerLibTranslators import (
     DICT_METHODS,
@@ -14,7 +14,7 @@ from cthreads.Thread.compile.pythonContainerLibTranslators import (
 from cthreads.Thread.compile.pythonContainerLibTranslators.is_containerOp import (
     is_container_op,
 )
-from helpers import make_ctx, parse_expr, parse_stmt
+from helpers import make_ctx, parse_expr, parse_stmt, registered_threadable
 
 
 def _list_ctx(**extra):
@@ -157,7 +157,27 @@ def test_expr_stmt_still_ignores_docstring_and_rejects_binop():
     assert "unsupported statement: Expr" in lines[0]
 
 
-def test_attribute_receiver_not_supported_yet():
-    """Only bare Name receivers (xs.append); obj.items.append waits on field typing."""
+def test_attribute_receiver_uses_threadable_field():
+    """obj.items.append waits on field typing via REGISTRY, not a handwritten map."""
+    Box = type(
+        "Box",
+        (),
+        {"__threadable": True, "__annotations__": {"items": list[int]}},
+    )
+    with registered_threadable(Box):
+        ctx = make_ctx(
+            owner_name="Box",
+            symbols={
+                "self": PyThreadable("Box", "x"),
+                "v": PyInt(),
+            },
+        )
+        assert resolve_container_op(parse_expr("self.items.append(v)"), ctx) is LIST_METHODS["append"]
+        assert call.translate(parse_expr("self.items.append(v)"), ctx) == (
+            "(this->items).push_back(v)"
+        )
+
+
+def test_untyped_attribute_receiver_is_none():
     ctx = make_ctx(symbols={"v": PyInt()})
     assert resolve_container_op(parse_expr("obj.items.append(v)"), ctx) is None

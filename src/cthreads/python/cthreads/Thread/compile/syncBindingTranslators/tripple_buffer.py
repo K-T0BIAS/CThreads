@@ -14,6 +14,7 @@ from typing import NamedTuple, Optional
 
 from ....pyTypes import PyCthreadsInternal, PyTBuffer, is_tbuffer_pytype
 from ..AstTranslators.context import TranslateContext
+from ..AstTranslators.typeof import expr_src, typeof
 
 Emit = Callable[[str, list[str]], str]
 
@@ -55,19 +56,16 @@ def resolve_tbuffer_op(node: ast.AST, ctx: TranslateContext) -> Optional[TBuffer
         return None
     if not isinstance(node.func, ast.Attribute):
         return None
+
+    recv = node.func.value
+    ty = typeof(recv, ctx)
+    if ty is None or not is_tbuffer_pytype(ty):
+        return None
     if node.keywords:
         raise TypeError(
             f"Thread function {ctx.func_name}: "
             "triple-buffer method keyword args are not supported"
         )
-
-    recv = node.func.value
-    if not isinstance(recv, ast.Name):
-        return None
-
-    ty = ctx.symbols.get(recv.id)
-    if not is_tbuffer_pytype(ty):
-        return None
 
     name = node.func.attr
     op = TBUFFER_METHODS.get(name)
@@ -75,7 +73,7 @@ def resolve_tbuffer_op(node: ast.AST, ctx: TranslateContext) -> Optional[TBuffer
         label = ty.name if isinstance(ty, (PyTBuffer, PyCthreadsInternal)) else "TBuffer"
         raise TypeError(
             f"Thread function {ctx.func_name}: "
-            f"unsupported {label} method {name!r} on {recv.id!r}"
+            f"unsupported {label} method {name!r} on {expr_src(recv)!r}"
         )
 
     n = len(node.args)
