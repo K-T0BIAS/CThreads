@@ -1,5 +1,5 @@
 """
-cthreads.V2.sync — host sync / TBuffer API.
+cthreads.sync — host sync / TBuffer API.
 
 - Annotation: ``TBuffer[...]`` (from types)
 - Host alloc: ``create_tbuffer`` / ``TBufferHandle`` / …

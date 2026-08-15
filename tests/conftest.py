@@ -16,7 +16,8 @@ PYTHON_PKG_ROOT = ROOT / "src" / "cthreads" / "python"
 if str(PYTHON_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_PKG_ROOT))
 
-from cthreads.CONFIG import KERNELS, REGISTRY, STORE  # noqa: E402
+from cthreads.frontend.Registry import REGISTRY  # noqa: E402
+from cthreads.kernel_meta import KERNELS  # noqa: E402
 
 # Re-export helpers so older `from conftest import ...` still works in this package.
 from helpers import make_ctx, make_threadable_type, parse_expr, parse_stmt  # noqa: E402,F401
@@ -24,13 +25,11 @@ from helpers import make_ctx, make_threadable_type, parse_expr, parse_stmt  # no
 
 @pytest.fixture(autouse=True)
 def _reset_cthreads_state():
-    """Isolate global REGISTRY / STORE / KERNELS between tests."""
+    """Isolate global REGISTRY / KERNELS between tests."""
     REGISTRY.clear()
-    STORE.clear()
     KERNELS.clear()
     yield
     REGISTRY.clear()
-    STORE.clear()
     KERNELS.clear()
 
 

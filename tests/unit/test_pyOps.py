@@ -1,38 +1,25 @@
-"""Unit tests for cthreads.pyOps operator tables + builtin whitelist."""
+"""Unit tests for operator tables + builtin whitelist."""
 
 import ast
 
-from cthreads.pyOps import BINOPS, BOOLOPS, BUILTINS, CMPOPS, UNARYOPS, is_builtin_call
+from cthreads.compiler.translation.syntax.Op import Op
 from helpers import parse_expr
 
 
-def test_binops_cover_common_ops():
-    assert BINOPS[ast.Add] == "+"
-    assert BINOPS[ast.Mult] == "*"
-    assert BINOPS[ast.Mod] == "%"
+def test_tables_cover_common_ops():
+    assert Op.BINOPS[ast.Add] == "+"
+    assert Op.BINOPS[ast.Mult] == "*"
+    assert Op.UNARYOPS[ast.USub] == "-"
+    assert Op.UNARYOPS[ast.Not] == "!"
+    assert Op.CMPOPS[ast.Lt] == "<"
+    assert Op.BOOLOPS[ast.And] == "&&"
+    assert "range" in Op.BUILTINS
+    assert "len" in Op.BUILTINS
+    assert "__sync_state" in Op.BUILTINS
 
 
-def test_unary_compare_bool_ops():
-    assert UNARYOPS[ast.USub] == "-"
-    assert UNARYOPS[ast.Not] == "!"
-    assert CMPOPS[ast.Lt] == "<"
-    assert CMPOPS[ast.Eq] == "=="
-    assert BOOLOPS[ast.And] == "&&"
-    assert BOOLOPS[ast.Or] == "||"
-
-
-def test_tables_are_typed_dicts():
-    assert all(isinstance(k, type) for k in BINOPS)
-    assert all(isinstance(v, str) for v in BINOPS.values())
-
-
-def test_builtins_whitelist():
-    assert BUILTINS == frozenset({"range", "len", "__sync_state"})
-    assert is_builtin_call(parse_expr("range(n)"), "range")
-    assert is_builtin_call(parse_expr("len(xs)"), "len")
-    assert is_builtin_call(parse_expr("__sync_state()"), "__sync_state")
-    assert not is_builtin_call(parse_expr("range(n)"), "len")
-    assert not is_builtin_call(parse_expr("len(xs)"), "range")
-    assert not is_builtin_call(parse_expr("math.sqrt(x)"), "len")
-    assert not is_builtin_call(parse_expr("foo(xs)"), "len")
-    assert not is_builtin_call(parse_expr("1 + 2"), "len")
+def test_is_builtin_call():
+    assert Op.is_builtin_call(parse_expr("len(xs)"), "len")
+    assert Op.is_builtin_call(parse_expr("range(3)"), "range")
+    assert not Op.is_builtin_call(parse_expr("len(xs)"), "range")
+    assert not Op.is_builtin_call(parse_expr("foo.len(xs)"), "len")

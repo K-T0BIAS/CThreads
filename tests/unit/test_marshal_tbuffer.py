@@ -4,6 +4,7 @@ import ctypes
 from unittest.mock import patch
 
 import cthreads.marshal as marshal
+from cthreads.sync import TBufferHandle
 
 
 def test_pack_tbuffer_calls_set_ptr(monkeypatch):
@@ -61,8 +62,6 @@ def test_pack_tbuffer_calls_set_ptr(monkeypatch):
 
 
 def test_pack_tbuffer_handle_uses_ptr(monkeypatch):
-    from cthreads.tbuffer_host import TBufferHandle
-
     captured: dict = {}
 
     class FakeFn:
@@ -103,6 +102,7 @@ def test_pack_tbuffer_handle_uses_ptr(monkeypatch):
         pack,
     )
     assert captured["args"][1].value == 0xBEEF
+    handle._destroyed = True  # avoid __del__ calling into missing kernels
 
 
 def test_writeback_skips_tbuffer(monkeypatch):

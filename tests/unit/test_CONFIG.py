@@ -1,15 +1,16 @@
-"""Unit tests for cthreads.CONFIG."""
+"""Unit tests for registry / version globals (replaces CONFIG tests)."""
 
-from cthreads.CONFIG import KERNELS, REGISTRY, STORE, VERSION, _Registry
+from cthreads.frontend.Registry.registry import REGISTRY, Registry
+from cthreads.kernel_meta import KERNELS
 
 
 def test_version_is_string():
-    assert isinstance(VERSION, str)
-    assert VERSION
+    assert isinstance(REGISTRY.VERSION, str)
+    assert REGISTRY.VERSION
 
 
 def test_registry_register_threadable_and_thread():
-    reg = _Registry()
+    reg = Registry()
 
     class T:
         pass
@@ -25,15 +26,14 @@ def test_registry_register_threadable_and_thread():
 
 
 def test_registry_overwrite_is_idempotent():
-    reg = _Registry()
+    reg = Registry()
 
     class T:
         pass
 
     class T2:
-        __name__ = "T"
+        pass
 
-    # simulate same name overwrite
     T2.__name__ = "T"
     reg.register_threadable(T)
     reg.register_threadable(T2)
@@ -42,8 +42,8 @@ def test_registry_overwrite_is_idempotent():
 
 def test_registry_clear():
     REGISTRY.register_threadable(type("A", (), {}))
-    STORE["A"] = "x"
     KERNELS["a"] = object()
     REGISTRY.clear()
     assert REGISTRY.threadables == {}
     assert REGISTRY.threads == {}
+    assert KERNELS == {}

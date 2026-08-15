@@ -19,7 +19,7 @@ class ThreadableUnit(BaseUnit):
     fields: dict[str, PyType]
     hpp_path: Path
     cpp_path: Path
-    methods: list[ThreadUnit] = field(default_factory=list)
+    methods: list["ThreadUnit"] = field(default_factory=list)
 
     def validate(self) -> None:
         cls = self.handle.target
@@ -29,7 +29,7 @@ class ThreadableUnit(BaseUnit):
             )
 
     def emit(self, *, force: bool = False, cache: dict[str, Any] | None = None) -> bool:
-        """Write ``__Threadable__/Name.{hpp,cpp}`` for this class and its methods."""
+        """Write `__Threadable__/Name.{hpp,cpp}` for this class and its methods."""
         from ...translation import translate_function
 
         name = self.handle.name

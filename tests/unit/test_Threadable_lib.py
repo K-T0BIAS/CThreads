@@ -1,8 +1,9 @@
-"""Unit tests for cthreads.Threadable.lib."""
+"""Unit tests for Threadable / type helpers."""
 
 import pytest
 
-from cthreads.Threadable.lib import is_internal_cthreads_type, is_threadable
+from cthreads.frontend.Threadable.lib import is_threadable
+from cthreads.types import is_internal_cthreads_type
 
 
 def test_is_threadable_whitelist_and_generics():

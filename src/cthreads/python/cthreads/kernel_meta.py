@@ -12,14 +12,13 @@ job.result() all use the same shape (primitives, Threadable, list, dict).
 from __future__ import annotations
 
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, get_type_hints
 
-from .CONFIG import KERNELS
-from .pyTypes import (
+from .types import (
     PyBool,
-    PyCthreadsInternal,
+    PyCThreadsInternalType,
     PyDict,
     PyFloat,
     PyInt,
@@ -31,6 +30,9 @@ from .pyTypes import (
     hint_to_pytype,
     is_tbuffer_pytype,
 )
+
+# Filled by build_kernel_meta(); cleared by CompileSession.compile()
+KERNELS: dict = {}
 
 
 @dataclass
@@ -187,7 +189,7 @@ def _primitive_cpp(kind: str) -> str:
     }[kind]
 
 
-def _tbuffer_inner_schema(py_type: PyCthreadsInternal) -> TypeSchema:
+def _tbuffer_inner_schema(py_type: PyCThreadsInternalType) -> TypeSchema:
     """Build element schema for fixed ``cthreads.sync.TBuffer*`` classes."""
     fixed: dict[str, TypeSchema] = {
         "TBufferF64": TypeSchema("float", "double"),
@@ -319,7 +321,7 @@ def hint_to_schema(
             inner=inner,
         )
 
-    if isinstance(py_type, PyCthreadsInternal) and py_type.name in TBUFFER_INTERNAL_NAMES:
+    if isinstance(py_type, PyCThreadsInternalType) and py_type.name in TBUFFER_INTERNAL_NAMES:
         inner = _tbuffer_inner_schema(py_type)
         return TypeSchema(
             "tbuffer",
@@ -358,7 +360,7 @@ def build_kernel_meta(
     if owner_name and names and names[0] == "self":
         cls = owner_cls
         if cls is None:
-            from .CONFIG import REGISTRY
+            from .frontend.Registry import REGISTRY
 
             cls = REGISTRY.threadables.get(owner_name)
         if cls is None:
@@ -810,7 +812,7 @@ def emit_tbuffer_runtime_files(
 
     ``_ext`` passes ``void*``; kernels cast to ``tripple_buffer<T>&``.
     """
-    from .CONFIG import STORE
+    from .frontend.Registry import REGISTRY
 
     thread_dir = Path(thread_dir).resolve()
     sorted_names = sorted(threadable_names)
@@ -823,12 +825,13 @@ def emit_tbuffer_runtime_files(
     free_read_cases: list[str] = []
 
     for name in sorted_names:
-        if name not in STORE:
+        unit = REGISTRY.threadable_units.get(name)
+        if unit is None:
             raise RuntimeError(
                 f"cthreads: TBuffer[{name}] used in a kernel but {name!r} "
-                "is missing from STORE (compile @Threadable first)"
+                "has no ThreadableUnit (compile @Threadable first)"
             )
-        hpp = Path(STORE[name]).resolve()
+        hpp = unit.hpp_path.resolve()
         rel = os.path.relpath(hpp, thread_dir).replace("\\", "/")
         includes.append(f'#include "{rel}"')
         create_cases.append(
@@ -923,7 +926,7 @@ def write_tbuffer_runtime(root: Path) -> bool:
 
     Returns True if allocator sources exist after this call.
     """
-    from .cache import write_if_changed
+    from .io import write_if_changed
 
     root = Path(root).resolve()
     thread_dir = root / "__Thread__"

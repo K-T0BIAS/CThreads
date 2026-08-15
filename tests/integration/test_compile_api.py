@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from cthreads.CONFIG import BINARY_PATH, KERNELS, REGISTRY, STORE
-from cthreads.compile import compile as ct_compile
+from cthreads import compile as ct_compile
+from cthreads.frontend.Registry import REGISTRY
+from cthreads.kernel_meta import KERNELS
 
 
 def test_compile_empty_registry_errors():
@@ -45,13 +46,12 @@ def test_compile_generates_cpp_for_registered_units(tmp_module):
     assert "Particle" in info["rewritten"] or (root / "__Threadable__" / "Particle.hpp").is_file()
     assert (root / "__Thread__" / "move.hpp").is_file()
     assert (root / "__Thread__" / "is_fast.cpp").is_file()
-    assert "move" in STORE and "Particle" in STORE
+    assert "Particle" in REGISTRY.threadable_units
+    assert "move" in REGISTRY.thread_units
     assert "move" in KERNELS and "Particle_step" in KERNELS
-    # REGISTRY retained for re-compile
     assert "Particle" in REGISTRY.threadables
     assert (root / ".cthreads_cache.json").is_file()
 
-    # idempotent: second compile should rewrite nothing if unchanged
     info2 = ct_compile(force=False)
     assert info2["rewritten"] == []
 
@@ -69,9 +69,8 @@ def test_compile_force_still_succeeds(tmp_module):
     )
     ct_compile(force=True)
     info = ct_compile(force=True)
-    # force skips hash short-circuit; identical content may not rewrite files
     assert info["root"] == Path(mod.__file__).parent
-    assert "add" in STORE
+    assert "add" in REGISTRY.thread_units
     assert "add" in KERNELS
 
 
@@ -105,8 +104,7 @@ def test_prepare_build_and_thread_job(tmp_module):
         assert job.done()
         assert job.result() == 5
     except RuntimeError as e:
-        # No compiler / app-control DLL lock — skip rather than fail CI without toolchain
-        if "compiler" in str(e).lower() or "STORE" in str(e):
+        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
             pytest.skip(str(e))
         raise
     finally:
@@ -147,7 +145,7 @@ def test_thread_job_await(tmp_module):
     try:
         assert asyncio.run(main()) == 15
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "STORE" in str(e):
+        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
             pytest.skip(str(e))
         raise
     finally:
@@ -166,7 +164,7 @@ def test_mutable_list_dict_writeback_by_ref(tmp_module):
         pytest.skip(f"cthreads._ext unavailable: {e}")
 
     from cthreads import prepare, thread, unload_kernels
-    from cthreads.CONFIG import KERNELS
+    from cthreads.kernel_meta import KERNELS
 
     mod = tmp_module(
         """
@@ -205,7 +203,7 @@ def test_mutable_list_dict_writeback_by_ref(tmp_module):
         job.join()
         assert d == {}
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "STORE" in str(e):
+        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
             pytest.skip(str(e))
         raise
     finally:
@@ -276,11 +274,10 @@ def test_kernel_sync_state_mid_run_writeback(tmp_module):
             time.sleep(0.0005)
         job.join()
         assert xs == [1, 2]
-        # Cross-DLL entry into _ext (would stay 0 with the old per-DLL TLS bug).
         assert ext._debug_ext_sync_invocations() >= 1
         assert saw_mid, "host never observed mid-run writeback from __sync_state()"
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "STORE" in str(e):
+        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
             pytest.skip(str(e))
         raise
     finally:

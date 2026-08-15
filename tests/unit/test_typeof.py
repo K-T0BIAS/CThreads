@@ -1,15 +1,15 @@
-"""Unit tests for expression typeof (Name / Threadable fields / list subscript)."""
+"""Unit tests for expression Typeof (Name / Threadable fields / list subscript)."""
 
 from __future__ import annotations
 
-from cthreads.pyTypes import (
-    PyCthreadsInternal,
+from cthreads.compiler.translation.Typeof import Typeof
+from cthreads.types import (
+    PyCThreadsInternalType,
     PyInt,
     PyList,
     PyThreadable,
     hint_to_pytype,
 )
-from cthreads.Thread.compile.AstTranslators.typeof import typeof
 from helpers import make_ctx, parse_expr, registered_threadable
 
 
@@ -23,8 +23,8 @@ _Body = type(
 
 def test_typeof_name():
     ctx = make_ctx(symbols={"n": PyInt()})
-    assert isinstance(typeof(parse_expr("n"), ctx), PyInt)
-    assert typeof(parse_expr("missing"), ctx) is None
+    assert isinstance(Typeof.of(parse_expr("n"), ctx), PyInt)
+    assert Typeof.of(parse_expr("missing"), ctx) is None
 
 
 def test_typeof_threadable_field():
@@ -32,22 +32,22 @@ def test_typeof_threadable_field():
         ctx = make_ctx(
             owner_name="TypeofBody",
             symbols={
-                "self": PyThreadable("TypeofBody", "x"),
-                "p": PyThreadable("TypeofBody", "x"),
+                "self": PyThreadable("TypeofBody"),
+                "p": PyThreadable("TypeofBody"),
             },
         )
-        a = typeof(parse_expr("self.a"), ctx)
-        assert isinstance(a, PyCthreadsInternal)
+        a = Typeof.of(parse_expr("self.a"), ctx)
+        assert isinstance(a, PyCThreadsInternalType)
         assert a.cpp_name == "cthreads::linalg::Array<float>"
-        xs = typeof(parse_expr("p.xs"), ctx)
+        xs = Typeof.of(parse_expr("p.xs"), ctx)
         assert isinstance(xs, PyList)
         assert isinstance(xs.inner_type, PyInt)
-        assert typeof(parse_expr("self.nope"), ctx) is None
+        assert Typeof.of(parse_expr("self.nope"), ctx) is None
 
 
 def test_typeof_list_subscript():
     ctx = make_ctx(symbols={"xs": PyList(PyInt()), "i": PyInt()})
-    inner = typeof(parse_expr("xs[i]"), ctx)
+    inner = Typeof.of(parse_expr("xs[i]"), ctx)
     assert isinstance(inner, PyInt)
 
 
@@ -55,12 +55,12 @@ def test_typeof_nested_list_then_field():
     with registered_threadable(_Body):
         ctx = make_ctx(
             symbols={
-                "bodies": PyList(PyThreadable("TypeofBody", "x")),
+                "bodies": PyList(PyThreadable("TypeofBody")),
                 "i": PyInt(),
             }
         )
-        ty = typeof(parse_expr("bodies[i].a"), ctx)
-        assert isinstance(ty, PyCthreadsInternal)
+        ty = Typeof.of(parse_expr("bodies[i].a"), ctx)
+        assert isinstance(ty, PyCThreadsInternalType)
         assert ty.name == "ArrayF32"
 
 
@@ -69,6 +69,6 @@ def test_hint_to_pytype_matches_typeof_field():
         py = hint_to_pytype(_ArrayF32)
         ctx = make_ctx(
             owner_name="TypeofBody",
-            symbols={"self": PyThreadable("TypeofBody", "x")},
+            symbols={"self": PyThreadable("TypeofBody")},
         )
-        assert typeof(parse_expr("self.a"), ctx).cpp_name == py.cpp_name
+        assert Typeof.of(parse_expr("self.a"), ctx).cpp_name == py.cpp_name

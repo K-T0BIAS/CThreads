@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-import cthreads
 from cthreads.job import Job
 
 # cthreads.prepare attribute is the function (shadows the submodule).
 prepare_mod = importlib.import_module("cthreads.prepare")
+ext_api = importlib.import_module("cthreads._ext_api")
 
 
 def _install_fake_ext(monkeypatch, *, path: str | None):
@@ -41,7 +41,8 @@ def _install_fake_ext(monkeypatch, *, path: str | None):
     fake.thread = thread
 
     monkeypatch.setitem(sys.modules, "cthreads._ext", fake)
-    monkeypatch.setattr(cthreads, "_ext", fake)
+    # _ext_api caches the import result; force it to use our fake.
+    monkeypatch.setattr(ext_api, "_ext", fake)
     return state
 
 

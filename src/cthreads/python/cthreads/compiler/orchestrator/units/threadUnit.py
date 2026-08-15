@@ -8,9 +8,7 @@ from ....frontend.Registry import REGISTRY
 from ....cache import source_fingerprint, write_if_changed
 from ....kernel_meta import build_kernel_meta, emit_trampoline_cpp, emit_trampoline_decls
 from ..session.export_macro import EXPORT_HPP
-
-if TYPE_CHECKING:
-    from .threadableUnit import ThreadableUnit
+from .threadableUnit import ThreadableUnit
 
 
 @dataclass
@@ -38,7 +36,7 @@ class ThreadUnit(BaseUnit):
                 )
 
     def emit(self, *, force: bool = False, cache: dict[str, Any] | None = None) -> bool:
-        """Write ``__Thread__/name.{hpp,cpp}`` for a free ``@Thread`` function."""
+        """Write `__Thread__/name.{hpp,cpp}` for a free `@Thread` function."""
         if self.owner is not None:
             return False
         if self.hpp_path is None or self.cpp_path is None:

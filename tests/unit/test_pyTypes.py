@@ -1,10 +1,10 @@
-"""Unit tests for cthreads.pyTypes."""
+"""Unit tests for cthreads.types."""
 
 import pytest
 
-from cthreads.pyTypes import (
+from cthreads.types import (
     PyBool,
-    PyCthreadsInternal,
+    PyCThreadsInternalType,
     PyDict,
     PyFloat,
     PyInt,
@@ -37,9 +37,10 @@ def test_list_and_dict_cpp_names_and_includes():
     assert "string" in inc
 
 
-def test_threadable_include_quotes():
-    t = PyThreadable("Particle", "__Threadable__/Particle.hpp")
-    assert t.build_include() == '#include "__Threadable__/Particle.hpp"\n'
+def test_threadable_identity_only():
+    t = PyThreadable("Particle")
+    assert t.cpp_name == "Particle"
+    assert t.build_include() == ""
 
 
 def test_hint_to_pytype_primitives_and_generics():
@@ -80,7 +81,7 @@ def test_hint_to_pytype_tbuffer_internal():
         __cthreads_internal__ = True
 
     py = hint_to_pytype(TBufferF64)
-    assert isinstance(py, PyCthreadsInternal)
+    assert isinstance(py, PyCThreadsInternalType)
     assert py.cpp_name == "cthreads::sync::tripple_buffer<double>"
     inc = py.build_include()
     assert '#include "sync/t_buffer.hpp"' in inc
@@ -98,7 +99,7 @@ def test_hint_to_pytype_linalg_internal():
         __cthreads_internal__ = True
 
     py = hint_to_pytype(ArrayF32)
-    assert isinstance(py, PyCthreadsInternal)
+    assert isinstance(py, PyCThreadsInternalType)
     assert py.cpp_name == "cthreads::linalg::Array<float>"
     inc = py.build_include()
     assert '#include "linalg/array.hpp"' in inc
@@ -131,6 +132,6 @@ def test_hint_to_pytype_live_linalg_classes():
     if linalg is None:
         pytest.skip("cthreads.linalg not built")
     py = hint_to_pytype(linalg.ArrayF32)
-    assert isinstance(py, PyCthreadsInternal)
+    assert isinstance(py, PyCThreadsInternalType)
     assert py.cpp_name == "cthreads::linalg::Array<float>"
     assert hint_to_pytype(linalg.Shape).cpp_name == "cthreads::linalg::Shape"

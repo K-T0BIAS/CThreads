@@ -9,7 +9,7 @@ Registry for threadable and thread functions.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...compile.orchestrator.units import ThreadableUnit, ThreadUnit
+    from ...compiler.orchestrator.units import ThreadableUnit, ThreadUnit
 
 
 class Registry:

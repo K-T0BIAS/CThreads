@@ -145,7 +145,8 @@ void fill_pack_from_values(
     py::dict types,            // layout info for @Threadables or nested containers (if present)
     py::dict schemas           // ^^^^
 ) {
-    // get the marshall module
+    // Pack/unpack lives in the public Python marshal module (V2 promoted to
+    // cthreads.marshal — same path the extension has always imported).
     py::module_ marshal = py::module_::import("cthreads.marshal");
     // call the pack_params function from the marshall module
     // this function walks all the trampoline setters for each param and calls them with the arg values

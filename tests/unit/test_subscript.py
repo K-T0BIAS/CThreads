@@ -2,8 +2,8 @@
 
 import ast
 
-from cthreads.pyTypes import PyFloat, PyInt, PyList
-from cthreads.Thread.compile.AstTranslators import subscript
+from cthreads.compiler.translation.syntax import Syntax
+from cthreads.types import PyFloat, PyInt, PyList
 from helpers import make_ctx
 
 
@@ -14,4 +14,4 @@ def test_subscript_list_index():
         slice=ast.Name(id="i", ctx=ast.Load()),
         ctx=ast.Load(),
     )
-    assert subscript.translate(node, ctx) == "(xs[i])"
+    assert Syntax.expr(node, ctx) == "(xs[i])"

@@ -1,8 +1,8 @@
-"""Extra edge-case coverage for pyTypes / hint mapping."""
+"""Extra edge-case coverage for types / hint mapping."""
 
 import pytest
 
-from cthreads.pyTypes import PyDict, PyList, hint_to_pytype
+from cthreads.types import PyDict, PyList, hint_to_pytype
 
 
 def test_nested_list_hint():
@@ -12,6 +12,5 @@ def test_nested_list_hint():
 
 
 def test_dict_requires_two_args():
-    # bare dict rejected
     with pytest.raises(TypeError):
         hint_to_pytype(dict)

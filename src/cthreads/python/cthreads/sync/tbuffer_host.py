@@ -63,7 +63,7 @@ def create_tbuffer(threadable_cls: type, capacity: int) -> TBufferHandle:
     )
     if not ptr:
         raise RuntimeError(
-            f"cthreads.V2.sync.create_tbuffer: failed for {name!r} "
+            f"cthreads.sync.create_tbuffer: failed for {name!r} "
             f"(rebuild kernels after adding TBuffer[{name}])"
         )
     return TBufferHandle(name, int(ptr))
@@ -140,7 +140,7 @@ def tbuffer_read_copy_ptr(handle: TBufferHandle) -> int:
         ctypes.c_void_p(handle.ptr),
     )
     if not ptr:
-        raise RuntimeError("cthreads.V2.sync.tbuffer_read_copy: null snapshot")
+        raise RuntimeError("cthreads.sync.tbuffer_read_copy: null snapshot")
     return int(ptr)
 
 

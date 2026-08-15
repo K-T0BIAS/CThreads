@@ -1,159 +1,138 @@
-"""Unit tests for AST expression translators."""
-
-import ast
+"""Unit tests for AST expression translation (Syntax.expr)."""
 
 import pytest
 
-from cthreads.pyTypes import PyFloat, PyInt, PyThreadable
-from cthreads.Thread.compile.AstTranslators import (
-    attribute,
-    binOp,
-    boolOp,
-    compare,
-    constant,
-    name,
-    unaryOp,
-)
-from cthreads.Thread.compile.AstTranslators.translate import translate_expr
+from cthreads.compiler.translation.syntax import Syntax
+from cthreads.types import PyFloat, PyInt, PyList, PyThreadable
 from helpers import make_ctx, parse_expr
 
 
 def test_constant_literals():
     ctx = make_ctx()
-    assert constant.translate(parse_expr("10"), ctx) == "10"
-    assert constant.translate(parse_expr("True"), ctx) == "true"
-    assert constant.translate(parse_expr('"hi"'), ctx) == '"hi"'
+    assert Syntax.expr(parse_expr("10"), ctx) == "10"
+    assert Syntax.expr(parse_expr("True"), ctx) == "true"
+    assert Syntax.expr(parse_expr('"hi"'), ctx) == '"hi"'
 
 
 def test_name_known_unknown_and_self():
     ctx = make_ctx(symbols={"a": PyInt()})
-    assert name.translate(parse_expr("a"), ctx) == "a"
+    assert Syntax.expr(parse_expr("a"), ctx) == "a"
     with pytest.raises(TypeError, match="unknown name"):
-        name.translate(parse_expr("missing"), ctx)
+        Syntax.expr(parse_expr("missing"), ctx)
 
-    mctx = make_ctx(owner_name="Particle", symbols={"self": PyThreadable("Particle", "x")})
-    assert name.translate(parse_expr("self"), mctx) == "(*this)"
+    mctx = make_ctx(owner_name="Particle", symbols={"self": PyThreadable("Particle")})
+    assert Syntax.expr(parse_expr("self"), mctx) == "(*this)"
 
 
 def test_attribute_self_and_plain():
     ctx = make_ctx(
         owner_name="Particle",
         symbols={
-            "self": PyThreadable("Particle", "x"),
-            "p": PyThreadable("Particle", "x"),
+            "self": PyThreadable("Particle"),
+            "p": PyThreadable("Particle"),
         },
     )
-    assert attribute.translate(parse_expr("self.x"), ctx) == "this->x"
-    assert attribute.translate(parse_expr("p.velocity"), ctx) == "p.velocity"
+    assert Syntax.expr(parse_expr("self.x"), ctx) == "this->x"
+    assert Syntax.expr(parse_expr("p.velocity"), ctx) == "p.velocity"
 
 
 def test_binop_and_pow():
     ctx = make_ctx(symbols={"a": PyInt(), "b": PyInt()})
-    assert binOp.translate(parse_expr("a + b"), ctx) == "(a + b)"
-    assert binOp.translate(parse_expr("a * b"), ctx) == "(a * b)"
-    assert binOp.translate(parse_expr("a ** b"), ctx) == "std::pow(a, b)"
+    assert Syntax.expr(parse_expr("a + b"), ctx) == "(a + b)"
+    assert Syntax.expr(parse_expr("a * b"), ctx) == "(a * b)"
+    assert Syntax.expr(parse_expr("a ** b"), ctx) == "std::pow(a, b)"
     assert any("cmath" in line for line in ctx.body_includes)
 
 
 def test_math_call_and_const():
     import math
 
-    from cthreads.Thread.compile.AstTranslators import call
-
     ctx = make_ctx(
         symbols={"x": PyFloat(), "y": PyFloat()},
         globals_extra={"math": math, "sqrt": math.sqrt},
     )
-    assert call.translate(parse_expr("math.sqrt(x)"), ctx) == "std::sqrt(x)"
-    assert call.translate(parse_expr("sqrt(x)"), ctx) == "std::sqrt(x)"
-    assert call.translate(parse_expr("math.atan2(y, x)"), ctx) == "std::atan2(y, x)"
-    assert attribute.translate(parse_expr("math.pi"), ctx) == "std::numbers::pi"
+    assert Syntax.expr(parse_expr("math.sqrt(x)"), ctx) == "std::sqrt(x)"
+    assert Syntax.expr(parse_expr("sqrt(x)"), ctx) == "std::sqrt(x)"
+    assert Syntax.expr(parse_expr("math.atan2(y, x)"), ctx) == "std::atan2(y, x)"
+    assert Syntax.expr(parse_expr("math.pi"), ctx) == "std::numbers::pi"
+    with pytest.raises(TypeError, match="expects"):
+        Syntax.expr(parse_expr("math.pow(x)"), ctx)
     with pytest.raises(TypeError, match="unsupported call"):
-        call.translate(parse_expr("math.pow(x)"), ctx)
-    with pytest.raises(TypeError, match="unsupported call"):
-        call.translate(parse_expr("unknown(x)"), ctx)
+        Syntax.expr(parse_expr("unknown(x)"), ctx)
 
 
 def test_builtin_len_call():
-    from cthreads.pyTypes import PyList
-    from cthreads.Thread.compile.AstTranslators import call
-
     ctx = make_ctx(symbols={"xs": PyList(PyInt()), "n": PyInt()})
-    assert call.translate(parse_expr("len(xs)"), ctx) == "(xs).size()"
+    assert Syntax.expr(parse_expr("len(xs)"), ctx) == "(xs).size()"
     with pytest.raises(TypeError, match="len\\(\\) expects 1 arg"):
-        call.translate(parse_expr("len()"), ctx)
+        Syntax.expr(parse_expr("len()"), ctx)
     with pytest.raises(TypeError, match="len\\(\\) expects 1 arg"):
-        call.translate(parse_expr("len(xs, n)"), ctx)
+        Syntax.expr(parse_expr("len(xs, n)"), ctx)
 
 
 def test_builtin_sync_state_call():
-    from cthreads.Thread.compile.AstTranslators import call
-
     ctx = make_ctx()
     assert (
-        call.translate(parse_expr("__sync_state()"), ctx)
+        Syntax.expr(parse_expr("__sync_state()"), ctx)
         == "cthreads::detail::__sync_state()"
     )
     assert any("sync/syncState.hpp" in line for line in ctx.body_includes)
     with pytest.raises(TypeError, match="__sync_state"):
-        call.translate(parse_expr("__sync_state(1)"), ctx)
+        Syntax.expr(parse_expr("__sync_state(1)"), ctx)
 
 
 def test_unaryop():
     ctx = make_ctx(symbols={"a": PyInt(), "f": PyFloat()})
-    assert unaryOp.translate(parse_expr("-a"), ctx) == "(-a)"
-    assert unaryOp.translate(parse_expr("not f"), ctx) == "(!f)"
+    assert Syntax.expr(parse_expr("-a"), ctx) == "(-a)"
+    assert Syntax.expr(parse_expr("not f"), ctx) == "(!f)"
 
 
 def test_compare_simple_and_chained():
     ctx = make_ctx(symbols={"a": PyInt(), "b": PyInt(), "c": PyInt()})
-    assert compare.translate(parse_expr("a < b"), ctx) == "(a < b)"
-    assert compare.translate(parse_expr("a < b < c"), ctx) == "((a < b) && (b < c))"
+    assert Syntax.expr(parse_expr("a < b"), ctx) == "(a < b)"
+    assert Syntax.expr(parse_expr("a < b < c"), ctx) == "((a < b) && (b < c))"
 
 
 def test_boolop_and_or_and_errors():
     ctx = make_ctx(symbols={"a": PyInt(), "b": PyInt(), "c": PyInt()})
-    assert boolOp.translate(parse_expr("a and b"), ctx) == "(a && b)"
-    assert boolOp.translate(parse_expr("a or b or c"), ctx) == "(a || b || c)"
+    assert Syntax.expr(parse_expr("a and b"), ctx) == "(a && b)"
+    assert Syntax.expr(parse_expr("a or b or c"), ctx) == "(a || b || c)"
 
 
 def test_translate_expr_dispatch_and_unsupported():
     ctx = make_ctx(symbols={"a": PyInt()})
-    assert translate_expr(parse_expr("a + 1"), ctx) == "(a + 1)"
+    assert Syntax.expr(parse_expr("a + 1"), ctx) == "(a + 1)"
     with pytest.raises(TypeError, match="unsupported expression"):
-        translate_expr(parse_expr("{1: 2}"), ctx)
+        Syntax.expr(parse_expr("{1: 2}"), ctx)
 
 
 def test_list_literal():
-    from cthreads.Thread.compile.AstTranslators import listLiteral
-
     ctx = make_ctx(symbols={"x": PyInt(), "y": PyInt()})
-    assert listLiteral.translate(parse_expr("[1, 2, 3]"), ctx) == (
+    assert Syntax.expr(parse_expr("[1, 2, 3]"), ctx) == (
         "std::vector<int>{1, 2, 3}"
     )
-    assert listLiteral.translate(parse_expr("[x, y]"), ctx) == (
+    assert Syntax.expr(parse_expr("[x, y]"), ctx) == (
         "std::vector<int>{x, y}"
     )
-    assert listLiteral.translate(parse_expr("[]"), ctx) == "{}"
-    assert listLiteral.translate(parse_expr("[[1, 2], [3, 4]]"), ctx) == (
+    assert Syntax.expr(parse_expr("[]"), ctx) == "{}"
+    assert Syntax.expr(parse_expr("[[1, 2], [3, 4]]"), ctx) == (
         "std::vector<std::vector<int>>{std::vector<int>{1, 2}, std::vector<int>{3, 4}}"
     )
     assert any("vector" in line for line in ctx.body_includes)
 
     sctx = make_ctx()
-    assert listLiteral.translate(parse_expr('["a", "b"]'), sctx) == (
+    assert Syntax.expr(parse_expr('["a", "b"]'), sctx) == (
         'std::vector<std::string>{"a", "b"}'
     )
     assert any("string" in line for line in sctx.body_includes)
 
     with pytest.raises(TypeError, match="mixed list element types"):
-        listLiteral.translate(parse_expr("[1, 2.0]"), ctx)
+        Syntax.expr(parse_expr("[1, 2.0]"), ctx)
     with pytest.raises(TypeError, match="starred"):
-        listLiteral.translate(parse_expr("[*x]"), ctx)
+        Syntax.expr(parse_expr("[*x]"), ctx)
     with pytest.raises(TypeError, match="cannot infer"):
-        listLiteral.translate(parse_expr("[x + y]"), ctx)
+        Syntax.expr(parse_expr("[x + y]"), ctx)
 
-    # nested empty sibling still typed from the non-empty row
-    assert translate_expr(parse_expr("[[1], []]"), ctx) == (
+    assert Syntax.expr(parse_expr("[[1], []]"), ctx) == (
         "std::vector<std::vector<int>>{std::vector<int>{1}, {}}"
     )

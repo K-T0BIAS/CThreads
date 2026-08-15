@@ -224,7 +224,7 @@ def _resolve_schema(
 
 
 def _tbuffer_native_ptr(value: Any, inner_type_name: str | None = None) -> int:
-    from .tbuffer_host import tbuffer_ptr
+    from .sync.tbuffer_host import tbuffer_ptr
 
     return tbuffer_ptr(value, inner_type_name)
 

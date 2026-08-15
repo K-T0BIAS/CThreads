@@ -2,8 +2,9 @@
 
 import pytest
 
-from cthreads.CONFIG import KERNELS
+from cthreads import Thread, Threadable
 from cthreads.kernel_meta import (
+    KERNELS,
     KernelMeta,
     ParamMeta,
     TypeSchema,
@@ -11,8 +12,7 @@ from cthreads.kernel_meta import (
     emit_trampoline_cpp,
     emit_trampoline_decls,
 )
-from cthreads.Thread.wrapper import Thread
-from cthreads.Threadable.wrapper import Threadable
+from cthreads.types import TBuffer
 
 
 def _prim(kind: str) -> TypeSchema:
@@ -184,8 +184,6 @@ def test_build_kernel_meta_tbuffer_fixed_and_threadable():
     assert meta.params[0].kind == "tbuffer"
     assert meta.params[0].pass_as == "tbuffer"
     assert meta.params[0].schema.inner.kind == "float"
-
-    from cthreads.pyTypes import TBuffer
 
     @Threadable
     class Particle:

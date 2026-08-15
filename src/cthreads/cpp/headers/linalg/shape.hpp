@@ -10,8 +10,9 @@ namespace cthreads::linalg {
         private:
             std::vector<size_t> _shape;
         public:
-            template<typename I>
-            Shape(const std::vector<I>& shape) : _shape(shape.begin(), shape.end()) {}
+            // Excplicit here bc otherwiese the compiler wont know when to convert vector<Slice> to shape or when to use the actual Slice objects
+            explicit Shape(const std::vector<size_t>& shape) : _shape(shape.begin(), shape.end()) {}
+            explicit Shape(const std::vector<int>& shape) : _shape(shape.begin(), shape.end()) {} // for codegen compatibility
             Shape(size_t value) : _shape({value}) {}
 
             ~Shape() = default;

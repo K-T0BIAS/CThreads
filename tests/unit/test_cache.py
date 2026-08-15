@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-from cthreads import CONFIG
 from cthreads.cache import (
     CACHE_FILENAME,
     cache_path_for_root,
@@ -14,6 +13,7 @@ from cthreads.cache import (
     source_fingerprint,
     write_if_changed,
 )
+from cthreads.frontend.Registry import REGISTRY
 
 
 def test_sha256_text_stable_and_distinct():
@@ -30,11 +30,7 @@ def test_source_fingerprint_includes_version(monkeypatch):
         return 1
 
     h1 = source_fingerprint(f)
-    monkeypatch.setattr(CONFIG, "VERSION", CONFIG.VERSION + "-x")
-    # cache module imported VERSION at load — fingerprint uses CONFIG.VERSION via import
-    from cthreads import cache as cache_mod
-
-    monkeypatch.setattr(cache_mod, "VERSION", "different")
+    monkeypatch.setattr(REGISTRY, "VERSION", REGISTRY.VERSION + "-x")
     h2 = source_fingerprint(f)
     assert h1 != h2
 
@@ -74,7 +70,7 @@ def test_save_and_load_cache_roundtrip(tmp_path: Path):
     data = load_cache(tmp_path)
     assert data["units"]["move"]["src_hash"] == "abc"
     assert data["link_hash"] == "L"
-    assert data["version"] == CONFIG.VERSION
+    assert data["version"] == REGISTRY.VERSION
 
 
 def test_hash_files_order_independent_by_name(tmp_path: Path):

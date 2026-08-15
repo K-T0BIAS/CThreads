@@ -3,10 +3,8 @@ Copyright (c) 2026 Tobias Karusseit
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
-
 from ..CONFIG import VERSION, REGISTRY
 from ..Threadable.lib import is_threadable
-
 
 def Thread(fn):
     """
@@ -67,22 +65,14 @@ def Thread(fn):
     """
     fn.__threaded = True
     fn.__thread_version = VERSION
-
     from typing import get_type_hints
-
-    hints = get_type_hints(fn) # get the type hints of the function (arguments and return type)
+    hints = get_type_hints(fn)
     for name, hint in hints.items():
-        # skip the return type if it is None or type(None)
-        if name == "return" and hint in (None, type(None)):
+        if name == 'return' and hint in (None, type(None)):
             continue
         try:
-            # check if the type is allowed in the cthreads api
             is_threadable(hint)
         except TypeError as e:
-            # raise an error if the type is not allowed in the cthreads api
-            raise TypeError(
-                f"Thread function {fn.__name__} has invalid type for {name!r}: {hint}"
-            ) from e
-
-    REGISTRY.register_thread(fn) # register the function in the cthreads api
+            raise TypeError(f'Thread function {fn.__name__} has invalid type for {name!r}: {hint}') from e
+    REGISTRY.register_thread(fn)
     return fn

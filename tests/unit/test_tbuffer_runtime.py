@@ -2,18 +2,20 @@
 
 from pathlib import Path
 
-from cthreads.CONFIG import KERNELS, STORE
+from cthreads import Thread, Threadable
+from cthreads.compiler.orchestrator.units import Handle, ThreadableUnit
+from cthreads.frontend.Registry import REGISTRY
 from cthreads.kernel_meta import (
+    KERNELS,
     KernelMeta,
     ParamMeta,
     TypeSchema,
+    build_kernel_meta,
     collect_tbuffer_threadables,
     emit_tbuffer_runtime_files,
     write_tbuffer_runtime,
 )
-from cthreads.pyTypes import TBuffer
-from cthreads.Thread.wrapper import Thread
-from cthreads.Threadable.wrapper import Threadable
+from cthreads.types import TBuffer
 
 
 def test_collect_tbuffer_threadables_from_kernels():
@@ -44,14 +46,22 @@ def test_emit_tbuffer_runtime_files(tmp_path):
     thread_dir.mkdir()
     threadable_dir = tmp_path / "__Threadable__"
     threadable_dir.mkdir()
-    (threadable_dir / "Particle.hpp").write_text("struct Particle {};\n", encoding="utf-8")
-    STORE["Particle"] = str(threadable_dir / "Particle.hpp")
+    hpp = threadable_dir / "Particle.hpp"
+    hpp.write_text("struct Particle {};\n", encoding="utf-8")
 
-    hpp, cpp = emit_tbuffer_runtime_files({"Particle"}, thread_dir)
+    Particle = type("Particle", (), {"__threadable": True, "__annotations__": {}})
+    REGISTRY.threadable_units["Particle"] = ThreadableUnit(
+        handle=Handle(name="Particle", path="dummy.py", target=Particle),
+        fields={},
+        hpp_path=hpp,
+        cpp_path=threadable_dir / "Particle.cpp",
+    )
 
-    assert "cthreads_create_tbuffer" in hpp
+    hpp_src, cpp = emit_tbuffer_runtime_files({"Particle"}, thread_dir)
+
+    assert "cthreads_create_tbuffer" in hpp_src
     assert "tripple_buffer<Particle>" in cpp
-    assert "../__Threadable__/Particle.hpp" in cpp
+    assert "../__Threadable__/Particle.hpp" in cpp.replace("\\", "/")
     assert "delete static_cast<cthreads::sync::tripple_buffer<Particle>*>" in cpp
 
 
@@ -64,13 +74,16 @@ def test_write_tbuffer_runtime_end_to_end(tmp_path):
     def step(buf: TBuffer[Particle]) -> None:
         pass
 
-    from cthreads.kernel_meta import build_kernel_meta
-
     build_kernel_meta(step, symbol="step")
-    STORE["Particle"] = str(tmp_path / "__Threadable__" / "Particle.hpp")
-    (tmp_path / "__Threadable__").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "__Threadable__" / "Particle.hpp").write_text(
-        "struct Particle { double x; };\n", encoding="utf-8"
+    threadable_dir = tmp_path / "__Threadable__"
+    threadable_dir.mkdir(parents=True, exist_ok=True)
+    hpp = threadable_dir / "Particle.hpp"
+    hpp.write_text("struct Particle { double x; };\n", encoding="utf-8")
+    REGISTRY.threadable_units["Particle"] = ThreadableUnit(
+        handle=Handle(name="Particle", path="dummy.py", target=Particle),
+        fields={},
+        hpp_path=hpp,
+        cpp_path=threadable_dir / "Particle.cpp",
     )
 
     assert write_tbuffer_runtime(tmp_path) is True

@@ -2,9 +2,8 @@
 
 import pytest
 
-from cthreads import CONFIG
-from cthreads.Thread.wrapper import Thread
-from cthreads.Threadable.wrapper import Threadable
+from cthreads import Thread, Threadable
+from cthreads.frontend.Registry import REGISTRY
 
 
 def test_thread_registers_and_marks():
@@ -13,8 +12,8 @@ def test_thread_registers_and_marks():
         return a + b
 
     assert add.__threaded is True
-    assert add.__thread_version == CONFIG.VERSION
-    assert CONFIG.REGISTRY.threads[add.__qualname__] is add
+    assert add.__thread_version == REGISTRY.VERSION
+    assert REGISTRY.threads[add.__qualname__] is add
 
 
 def test_thread_rejects_bad_type():
@@ -39,7 +38,7 @@ def test_threadable_registers_fields_and_methods():
             self.x += dt
 
     assert Particle.__threadable is True
-    assert CONFIG.REGISTRY.threadables["Particle"] is Particle
+    assert REGISTRY.threadables["Particle"] is Particle
     assert Particle.step.__threaded is True
 
 

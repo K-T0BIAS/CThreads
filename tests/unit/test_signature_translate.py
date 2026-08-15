@@ -1,53 +1,38 @@
 """Unit tests for signature + full function translate."""
 
-import ast
-import textwrap
+from pathlib import Path
 
 import pytest
 
-from cthreads.CONFIG import STORE, VERSION
-from cthreads.pyTypes import PyInt
-from cthreads.Thread.compile.AstTranslators.signature import translate_signature
-from cthreads.Thread.compile.AstTranslators.translate import (
-    TranslateResult,
+from cthreads.compiler.translation import (
+    Signature,
+    Source,
+    TranslationResult,
     translate_function,
 )
-from helpers import make_ctx
-
-
-def _func_def(src: str) -> ast.FunctionDef:
-    tree = ast.parse(textwrap.dedent(src))
-    return next(n for n in tree.body if isinstance(n, ast.FunctionDef))
+from cthreads.compiler.translation.context import TranslationContext
+from cthreads.frontend.Registry import REGISTRY
+from cthreads.compiler.orchestrator.units import Handle, ThreadableUnit
+from helpers import make_threadable_type
 
 
 def test_signature_params_and_void_return():
-    ctx = make_ctx("move", hints={"p": int, "dt": float, "return": None})
-    # use float/int properly via fake threadable? int is fine
-    ctx.hints = {"a": int, "b": float, "return": type(None)}
-    fd = _func_def(
-        """
-        def move(a: int, b: float) -> None:
-            pass
-        """
-    )
-    parts = translate_signature(fd, ctx)
-    assert parts.return_type == "void"
+    def move(a: int, b: float) -> None:
+        pass
+
+    ctx = TranslationContext(fn=move, this_file=Path("x.hpp"))
+    parts = Signature.translate(Source.parse_function(move), ctx)
+    assert parts.return_type is None
     assert parts.params_csv == "int a, double b"
     assert ctx.symbols["a"].cpp_name == "int"
 
 
 def test_signature_mutables_pass_by_ref():
-    ctx = make_ctx(
-        "mut",
-        hints={"xs": list[int], "d": dict[str, int], "return": type(None)},
-    )
-    fd = _func_def(
-        """
-        def mut(xs: list[int], d: dict[str, int]) -> None:
-            pass
-        """
-    )
-    parts = translate_signature(fd, ctx)
+    def mut(xs: list[int], d: dict[str, int]) -> None:
+        pass
+
+    ctx = TranslationContext(fn=mut, this_file=Path("x.hpp"))
+    parts = Signature.translate(Source.parse_function(mut), ctx)
     assert parts.params_csv == (
         "std::vector<int>& xs, "
         "std::unordered_map<std::string, int>& d"
@@ -55,29 +40,43 @@ def test_signature_mutables_pass_by_ref():
 
 
 def test_signature_missing_annotation():
-    ctx = make_ctx("f", hints={})
-    fd = _func_def("def f(a):\n    pass")
+    def f(a):
+        pass
+
+    f.__annotations__.clear()
+    ctx = TranslationContext(fn=f, this_file=Path("x.hpp"))
     with pytest.raises(TypeError, match="needs a type annotation"):
-        translate_signature(fd, ctx)
+        Signature.translate(Source.parse_function(f), ctx)
 
 
 def test_signature_rejects_varargs():
-    ctx = make_ctx("f", hints={"xs": int, "return": None})
-    fd = _func_def("def f(*xs: int) -> None:\n    pass")
+    def f(*xs: int) -> None:
+        pass
+
+    ctx = TranslationContext(fn=f, this_file=Path("x.hpp"))
     with pytest.raises(TypeError, match="not supported"):
-        translate_signature(fd, ctx)
+        Signature.translate(Source.parse_function(f), ctx)
 
 
 def test_signature_method_drops_self():
-    STORE["Particle"] = "__Threadable__/Particle.hpp"
-    ctx = make_ctx("step", owner_name="Particle", hints={"dt": float, "return": None})
-    fd = _func_def(
-        """
-        def step(self, dt: float) -> None:
-            pass
-        """
+    Particle = make_threadable_type("Particle")
+    REGISTRY.register_threadable(Particle)
+    unit = ThreadableUnit(
+        handle=Handle(name="Particle", path="p.py", target=Particle),
+        fields={},
+        hpp_path=Path("__Threadable__/Particle.hpp"),
+        cpp_path=Path("__Threadable__/Particle.cpp"),
     )
-    parts = translate_signature(fd, ctx)
+    REGISTRY.threadable_units["Particle"] = unit
+
+    def step(self, dt: float) -> None:
+        pass
+
+    step.__qualname__ = "Particle.step"
+    ctx = TranslationContext(
+        fn=step, this_file=unit.hpp_path, owner=unit
+    )
+    parts = Signature.translate(Source.parse_function(step), ctx)
     assert parts.params_csv == "double dt"
     assert "self" in ctx.symbols
 
@@ -87,16 +86,10 @@ def test_translate_function_body_and_result_helpers():
         b: int = a + 1
         return b
 
-    fd = _func_def(
-        """
-        def move(a: int) -> int:
-            b: int = a + 1
-            return b
-        """
-    )
-    result = translate_function(move, fd, {"a": int, "return": int})
-    assert isinstance(result, TranslateResult)
-    assert result.return_type == "int"
+    result = translate_function(move, this_file=Path("move.hpp"))
+    assert isinstance(result, TranslationResult)
+    assert result.return_type is not None
+    assert result.return_type.cpp_name == "int"
     assert "int b = (a + 1);" in result.body
     assert "return b;" in result.body
     assert result.free_signature().startswith("CTHREADS_API int move(")

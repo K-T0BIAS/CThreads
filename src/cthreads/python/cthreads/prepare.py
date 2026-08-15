@@ -1,10 +1,4 @@
-"""
-Copyright (c) 2026 Tobias Karusseit
-This source code is licensed under the MIT license found in the
-LICENSE file in the root directory of this source tree.
-
-High-level prepare + thread entry with optional force-recompile.
-"""
+"""High-level prepare + thread entry for V2."""
 
 from __future__ import annotations
 
@@ -12,17 +6,26 @@ from pathlib import Path
 from typing import Any
 
 from .build import build
-from .compile import compile
+from .compiler.orchestrator import CompileSession
 from .job import Job, wrap_job
+
+
+def compile(force: bool = False) -> dict:
+    """
+    Drain the V2 registry into units, emit C++, write tbuffer runtime.
+
+    Unchanged units (matching ``src_hash``) skip translate/emit and only
+    refresh kernel meta unless ``force`` is True.
+    """
+    return CompileSession.compile(force=force)
 
 
 def prepare(force: bool = False) -> Path:
     """
-    Codegen + native build (hash-cached unless force=True).
+    Codegen + native build.
 
     Does **not** unload a loaded kernel library. On Windows a force-relink
-    over an already-loaded DLL will fail — call ``unload_kernels()`` first,
-    then ``prepare(force=True)`` / ``load_kernels``.
+    over an already-loaded DLL will fail — call ``unload_kernels()`` first.
     """
     info = compile(force=force)
     return build(project_root=info["root"], force=force)
@@ -32,31 +35,22 @@ def thread(fn, *args: Any, force: bool = False, **kwargs: Any) -> Job:
     """
     Return an awaitable Job on the currently loaded kernels.
 
-    - If kernels are already loaded and ``force`` is False: spawn only
-      (no prepare / load / unload — safe under concurrent callers).
-    - If nothing is loaded: ``prepare`` (cache-checked) then ``load_kernels``,
-      then spawn.
-    - If ``force`` is True while kernels are loaded: raises — unload first.
-
-    Usage::
-
-        job = cthreads.thread(fn, ...)
-        result = await job
+    Pack/unpack goes through ``cthreads.marshal`` (imported by ``_ext``).
     """
-    from . import _ext
+    from . import _ext_api
 
-    loaded = _ext.kernel_path()
+    loaded = _ext_api.kernel_path()
     if force:
         if loaded:
             raise RuntimeError(
                 "cthreads.thread(force=True): kernels are still loaded. "
-                "Call cthreads.unload_kernels() before force-rebuild, then "
+                "Call unload_kernels() before force-rebuild, then "
                 "thread(..., force=True) or prepare(force=True)+load_kernels."
             )
         binary = prepare(force=True)
-        _ext.load_kernels(str(binary))
+        _ext_api.load_kernels(str(binary))
     elif not loaded:
         binary = prepare(force=False)
-        _ext.load_kernels(str(binary))
+        _ext_api.load_kernels(str(binary))
 
-    return wrap_job(_ext.thread(fn, *args, **kwargs))
+    return wrap_job(_ext_api.thread(fn, *args, **kwargs))

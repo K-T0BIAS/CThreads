@@ -1,4 +1,4 @@
-"""Lazy binding to ``cthreads._ext`` (native extension; not a v1 Python module)."""
+"""Lazy binding to `cthreads._ext` (native extension; not a v1 Python module)."""
 
 from __future__ import annotations
 

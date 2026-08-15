@@ -1,14 +1,11 @@
 """
-Copyright (c) 2026 Tobias Karusseit
-This source code is licensed under the MIT license found in the
-LICENSE file in the root directory of this source tree.
+Compile generated C++ sources into one shared library.
 
-Compile generated C++ sources into one shared library using the user's compiler.
-
-Requires `api.compile()` to have populated STORE first.
-Output binary is written at the user project root (parent of `__Threadable__` /
-`__Thread__`), so a later thread-dispatch binding can load it from a stable path.
+Requires `CompileSession.compile()` to have filled
+`REGISTRY.threadable_units` / `thread_units` first.
 """
+
+from __future__ import annotations
 
 import os
 import shutil
@@ -16,23 +13,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import CONFIG
+from . import runtime
+from .frontend.Registry import REGISTRY
 
 BINARY_STEM = "cthreads_kernels"
 
 
 def _locate_vs_cl() -> str | None:
-    """
-    Locate the Visual Studio CL compiler.
-    """
-    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)") # get the path to the Program Files (x86) directory
-    vswhere = Path(pf86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe" # get the path to the vswhere.exe file
-    if not vswhere.is_file(): # check if the vswhere.exe file exists
-        return None # return None if it doesn't exist
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    vswhere = Path(pf86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    if not vswhere.is_file():
+        return None
 
-    probe = subprocess.run( # run the vswhere.exe file to find the CL compiler
+    probe = subprocess.run(
         [
-            str(vswhere), # the path to the vswhere.exe file
+            str(vswhere),
             "-latest",
             "-products",
             "*",
@@ -49,7 +44,6 @@ def _locate_vs_cl() -> str | None:
 
 
 def _vcvars_for_cl(cl_path: str) -> Path | None:
-    """Best-effort: .../VC/Auxiliary/Build/vcvars64.bat from a cl.exe path."""
     p = Path(cl_path).resolve()
     for parent in p.parents:
         candidate = parent / "Auxiliary" / "Build" / "vcvars64.bat"
@@ -59,10 +53,6 @@ def _vcvars_for_cl(cl_path: str) -> Path | None:
 
 
 def _detect_compiler() -> tuple[str, str]:
-    """
-    Returns (compiler_path, flavor) where flavor is 'msvc' | 'gnu'.
-    Prefer CXX, then platform-typical drivers.
-    """
     env_cxx = os.environ.get("CXX")
     candidates: list[str] = []
     if env_cxx:
@@ -89,54 +79,61 @@ def _detect_compiler() -> tuple[str, str]:
     )
 
 
-def _project_root_from_store() -> Path:
-    """
-    Infer the user project root as the common parent of generated
-    `__Threadable__` / `__Thread__` directories referenced by STORE.
-    """
-    if not CONFIG.STORE:
-        raise RuntimeError("STORE is empty — call api.compile() before api.build()")
-
+def _project_root_from_units() -> Path:
     roots: set[Path] = set()
-    for hpp in CONFIG.STORE.values():
-        path = Path(hpp).resolve()
-        if path.parent.name in ("__Threadable__", "__Thread__"):
-            roots.add(path.parent.parent)
-        else:
-            roots.add(path.parent)
+    for unit in REGISTRY.threadable_units.values():
+        roots.add(unit.hpp_path.resolve().parent.parent)
+    for unit in REGISTRY.thread_units.values():
+        if unit.owner is not None or unit.hpp_path is None:
+            continue
+        roots.add(unit.hpp_path.resolve().parent.parent)
 
+    if not roots:
+        raise RuntimeError(
+            "No compiled units — call CompileSession.compile() before build()"
+        )
     if len(roots) == 1:
         return next(iter(roots))
-
     try:
         return Path(os.path.commonpath([str(r) for r in roots]))
     except ValueError as e:
         raise RuntimeError(
-            f"Cannot determine a single project root from STORE paths: {roots}"
+            f"Cannot determine a single project root from unit paths: {roots}"
         ) from e
 
 
 def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
     sources: list[Path] = []
     include_dirs: set[Path] = set()
+    thread_dirs: set[Path] = set()
 
-    for hpp in CONFIG.STORE.values():
-        hpp_path = Path(hpp).resolve()
-        cpp_path = hpp_path.with_suffix(".cpp")
+    for unit in REGISTRY.threadable_units.values():
+        cpp_path = unit.cpp_path.resolve()
         if not cpp_path.is_file():
             raise FileNotFoundError(f"Missing generated source: {cpp_path}")
         sources.append(cpp_path)
-        include_dirs.add(hpp_path.parent)
+        include_dirs.add(unit.hpp_path.resolve().parent)
+        thread_dirs.add(unit.hpp_path.resolve().parent.parent / "__Thread__")
 
-    # Bundled runtime headers (sync/, future math/, ...) live under cpp/headers.
-    # Path: .../python/cthreads/build.py -> .../cpp/headers
+    for unit in REGISTRY.thread_units.values():
+        if unit.owner is not None:
+            continue
+        if unit.cpp_path is None or unit.hpp_path is None:
+            raise RuntimeError(f"Free ThreadUnit {unit.handle.name} missing paths")
+        cpp_path = unit.cpp_path.resolve()
+        if not cpp_path.is_file():
+            raise FileNotFoundError(f"Missing generated source: {cpp_path}")
+        sources.append(cpp_path)
+        include_dirs.add(unit.hpp_path.resolve().parent)
+        thread_dirs.add(unit.hpp_path.resolve().parent)
+
+    # Bundled runtime headers: .../python/cthreads/V2/build.py -> .../cpp/headers
     runtime_headers = (
         Path(__file__).resolve().parent.parent.parent / "cpp" / "headers"
     )
     if runtime_headers.is_dir():
         include_dirs.add(runtime_headers)
 
-    # Always link the sync bridge so `__sync_state()` can call into `_ext` TLS.
     sync_bridge = (
         Path(__file__).resolve().parent.parent.parent
         / "cpp"
@@ -146,13 +143,6 @@ def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
     if sync_bridge.is_file():
         sources.append(sync_bridge)
 
-    thread_dirs: set[Path] = set()
-    for hpp in CONFIG.STORE.values():
-        hpp_path = Path(hpp).resolve()
-        if hpp_path.parent.name == "__Threadable__":
-            thread_dirs.add(hpp_path.parent.parent / "__Thread__")
-        elif hpp_path.parent.name == "__Thread__":
-            thread_dirs.add(hpp_path.parent)
     for thread_dir in thread_dirs:
         tbuf_cpp = thread_dir / "cthreads_tbuffer.cpp"
         if tbuf_cpp.is_file():
@@ -175,20 +165,15 @@ def build(
     force: bool = False,
 ) -> Path:
     """
-    Compile all STORE-backed .cpp files into one shared library.
+    Compile all unit-backed `.cpp` files into one shared library.
 
-    Args:
-        project_root: where to place the binary; default = inferred from STORE
-        force: if True, always relink even when link_hash matches
-
-    Returns:
-        Path to the built shared library
+    Returns the path to the built shared library and sets `runtime.BINARY_PATH`.
     """
     from .cache import ensure_gitignore, hash_files, load_cache, save_cache
 
     compiler, flavor = _detect_compiler()
     sources, include_dirs = _collect_sources_and_includes()
-    root = Path(project_root).resolve() if project_root else _project_root_from_store()
+    root = Path(project_root).resolve() if project_root else _project_root_from_units()
     root.mkdir(parents=True, exist_ok=True)
     ensure_gitignore(root)
 
@@ -202,7 +187,7 @@ def build(
         and cache.get("link_hash") == link_hash
         and cache.get("binary") == str(out)
     ):
-        CONFIG.BINARY_PATH = str(out)
+        runtime.BINARY_PATH = str(out)
         return out
 
     if flavor == "msvc":
@@ -254,7 +239,7 @@ def build(
     if not out.is_file():
         raise RuntimeError(f"Build reported success but missing output: {out}")
 
-    CONFIG.BINARY_PATH = str(out)
+    runtime.BINARY_PATH = str(out)
     cache["link_hash"] = link_hash
     cache["binary"] = str(out)
     save_cache(root, cache)

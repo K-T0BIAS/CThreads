@@ -1,9 +1,5 @@
 """
-Copyright (c) 2026 Tobias Karusseit
-This source code is licensed under the MIT license found in the
-LICENSE file in the root directory of this source tree.
-
-cthreads — Python frontend + native runtime.
+cthreads — Python frontend + native runtime (V2 promoted to package root).
 
 Public surface:
   @cthreads.Threadable / @cthreads.Thread
@@ -11,44 +7,33 @@ Public surface:
   cthreads.Job (awaitable native thread handle)
   cthreads.sync / cthreads.math / …  (pybind submodules on _ext)
 
+Legacy v1 tree lives under ``cthreads.V1``.
+A thin ``cthreads.V2`` shim re-exports this package for old imports.
+
 Jobs::
 
     job = cthreads.thread(fn, ...)
-    result = await job                 # preferred async path (auto-starts)
-    job.start(); job.join(); job.result()   # sync still works
-    job.sync_state() / sync_state(job)      # mid-run Threadable writeback
-    __sync_state() in @Thread bodies        # compiled kernel barrier
+    result = await job
 
-``thread()`` spawns on already-loaded kernels (no per-call unload). First use
-runs cache-checked ``prepare`` + ``load_kernels``. Call ``unload_kernels()``
-yourself before a force-rebuild, or at process exit.
+``thread()`` spawns on already-loaded kernels. First use runs cache-checked
+``prepare`` + ``load_kernels``. Call ``unload_kernels()`` before a force-rebuild.
 
-Native API pattern (sync, math, future libs)
---------------------------------------------
-Pybind defines submodules on ``cthreads._ext`` (``def_submodule("sync")``, …).
-We import ``_ext`` **once** and re-export each submodule on ``cthreads``:
-
-    from cthreads import sync, math
-    sync.Lock()
-    math.abs(-1.0)
-
-Do **not** ``sys.modules["cthreads.sync"] = …`` or add shadow ``sync.py`` /
-``math.py`` wrappers — that can double-init the extension and break pybind
-types (``Lock`` already defined).
+Native ``_ext`` packs args via ``cthreads.marshal`` (this package).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .Threadable.wrapper import Threadable
-from .Thread.wrapper import Thread
-from .compile import compile
+from .frontend.Threadable import Threadable
+from .frontend.Thread import Thread
+from .frontend.Registry import REGISTRY
+from .prepare import compile, prepare, thread
 from .build import build
-from .prepare import prepare, thread
 from .job import Job, wrap_job, sync_state
-from .pyTypes import TBuffer
-from .tbuffer_host import (
+from . import sync
+from .sync import (
+    TBuffer,
     TBufferHandle,
     create_tbuffer,
     destroy_tbuffer,
@@ -56,12 +41,11 @@ from .tbuffer_host import (
     tbuffer_read_copy_ptr,
     tbuffer_free_read_copy,
 )
-from . import CONFIG
+from .kernel_meta import KERNELS
+from . import runtime
+from . import _ext_api
 
-# Kernel-only barrier: importable so ``from cthreads import __sync_state`` works
-# and codegen can resolve the name. Calling it from normal Python is an error —
-# it only runs after AST lowering to ``cthreads::detail::__sync_state()``
-# (kernel bridge → ``_ext`` TLS writeback).
+
 def __sync_state() -> None:
     raise RuntimeError(
         "cthreads.__sync_state() is only valid inside @Thread bodies "
@@ -69,36 +53,25 @@ def __sync_state() -> None:
     )
 
 
-# --- _ext once; re-export submodules (same pattern for sync, math, ...) --------
+load_kernels = _ext_api.load_kernels
+unload_kernels = _ext_api.unload_kernels
+kernel_path = _ext_api.kernel_path
+spawn = _ext_api.spawn
+
 try:
-    from . import _ext as _ext # try getting the extension module (c++ code)
+    from cthreads import _ext as _ext
 except ImportError:
     _ext = None  # type: ignore[assignment]
 
 if _ext is not None:
-    sync = _ext.sync # get the sync module
-    math = getattr(_ext, "math", None)  # older wheels may lack math
+    math = getattr(_ext, "math", None)
     linalg = getattr(_ext, "linalg", None)
-    load_kernels = _ext.load_kernels # get the load_kernels function
-    unload_kernels = _ext.unload_kernels # get the unload_kernels function
-    host_os = _ext.host_os # get the host_os function
-    kernel_path = getattr(_ext, "kernel_path", lambda: None) # get the kernel_path function
-
-    def spawn(fn, *args: Any, **kwargs: Any) -> Job:
-        """Low-level: bind args and return an awaitable Job (no prepare/compile)."""
-        return wrap_job(_ext.thread(fn, *args, **kwargs))
-
+    host_os = getattr(_ext, "host_os", None)
 else:
-    sync = None  # type: ignore[assignment,misc]
     math = None  # type: ignore[assignment]
     linalg = None  # type: ignore[assignment]
-    load_kernels = None  # type: ignore[assignment,misc]
-    unload_kernels = None  # type: ignore[assignment,misc]
-    host_os = None  # type: ignore[assignment,misc]
-    spawn = None  # type: ignore[assignment,misc]
+    host_os = None  # type: ignore[assignment]
 
-    def kernel_path():
-        return None
 
 __all__ = [
     "Threadable",
@@ -109,6 +82,7 @@ __all__ = [
     "thread",
     "spawn",
     "Job",
+    "wrap_job",
     "sync_state",
     "__sync_state",
     "TBuffer",
@@ -126,20 +100,15 @@ __all__ = [
     "kernel_path",
     "host_os",
     "BINARY_PATH",
-    "STORE",
     "KERNELS",
     "VERSION",
+    "REGISTRY",
 ]
 
 
 def __getattr__(name: str) -> Any:
-    # Live bindings — CONFIG.* is mutated by compile/build.
     if name == "BINARY_PATH":
-        return CONFIG.BINARY_PATH
-    if name == "STORE":
-        return CONFIG.STORE
-    if name == "KERNELS":
-        return CONFIG.KERNELS
+        return runtime.BINARY_PATH
     if name == "VERSION":
-        return CONFIG.VERSION
+        return REGISTRY.VERSION
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

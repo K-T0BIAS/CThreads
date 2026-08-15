@@ -15,7 +15,7 @@ Public usage::
     job.join()
     job.result()
 
-    # mid-run Threadable writeback (mirrors kernel ``__sync_state()``):
+    # mid-run Threadable writeback (mirrors kernel `__sync_state()`):
     job.start()
     while not job.done():
         job.sync_state()        # or cthreads.sync_state(job)
@@ -53,7 +53,7 @@ class Job:
         self._raw.join()
 
     def wait(self) -> None:
-        """Block until done (condition wait); prefer ``join`` to reap the thread."""
+        """Block until done (condition wait); prefer `join` to reap the thread."""
         if not self._started:
             self.start()
         self._raw.wait()
@@ -64,7 +64,7 @@ class Job:
     def sync_state(self) -> None:
         """
         Steal the job's state mutex and writeback Threadable/list/dict args
-        into the live Python objects (same effect as kernel ``__sync_state()``).
+        into the live Python objects (same effect as kernel `__sync_state()`).
 
         The job must have been started. No-op once the kernel has finished
         (final writeback already ran). Blocks until it can take the mutex.
@@ -111,10 +111,10 @@ def wrap_job(raw: Any) -> Job:
 
 def sync_state(job: Job) -> None:
     """
-    Host mirror of kernel ``__sync_state()``: steal ``job``'s state mutex and
+    Host mirror of kernel `__sync_state()`: steal `job`'s state mutex and
     writeback Threadable/list/dict pack fields into the live Python objects.
 
-    Equivalent to ``job.sync_state()``.
+    Equivalent to `job.sync_state()`.
     """
     if not isinstance(job, Job):
         raise TypeError(
