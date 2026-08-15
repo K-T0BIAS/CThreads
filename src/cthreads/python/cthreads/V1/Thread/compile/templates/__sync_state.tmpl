@@ -1,7 +1,0 @@
-// sync/syncState.hpp — JobContext layout + `__sync_state()` declaration.
-// Codegen emits: cthreads::detail::__sync_state();
-// Definition lives in the kernel DLL (cpp/runtime/sync_bridge.cpp) and calls
-// into `_ext` (bound at load_kernels). TLS JobContext is owned only by `_ext`.
-namespace cthreads::detail {
-// see headers/sync/syncState.hpp + runtime/sync_bridge.cpp
-}

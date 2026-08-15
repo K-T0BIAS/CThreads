@@ -8,8 +8,6 @@ Detection: module (or callable's module) marked `__cthreads_internal__`
 (pybind binds the flag on the module, not on each function).
 """
 
-from __future__ import annotations
-
 import ast
 import sys
 from typing import Any, NamedTuple
@@ -80,7 +78,7 @@ def _cthreads_math_op(obj: Any, parent_mod: Any) -> _CthreadsMathOp | None:
 
 
 class CthreadsMathCallPlugin(CallPlugin):
-    """`cthreads.math.abs(x)` → `cthreads::math::abs(x)` + `#include "math/abs.hpp"`."""
+    """`cthreads.math.abs(x)` -> `cthreads::math::abs(x)` + `#include "math/abs.hpp"`."""
 
     def try_lower(
         self,
