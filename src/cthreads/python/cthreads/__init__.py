@@ -21,8 +21,6 @@ Jobs::
 Native ``_ext`` packs args via ``cthreads.marshal`` (this package).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from .frontend.Threadable import Threadable
@@ -41,6 +39,7 @@ from .sync import (
     tbuffer_read_copy_ptr,
     tbuffer_free_read_copy,
 )
+from .pool.threadPool import ThreadPool
 from .kernel_meta import KERNELS
 from . import runtime
 from . import _ext_api
@@ -103,6 +102,7 @@ __all__ = [
     "KERNELS",
     "VERSION",
     "REGISTRY",
+    "ThreadPool",
 ]
 
 

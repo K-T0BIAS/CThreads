@@ -16,9 +16,14 @@
 #include "../headers/sync/syncState.hpp"
 #include "../headers/sync/t_buffer.hpp"
 #include "linalg.hpp"
+#include "pool.hpp"
+#include "../headers/pool/threadPool.hpp"
 
 #include <cstdint>
 #include <atomic>
+#include <condition_variable>
+#include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -66,18 +71,16 @@ Also owns pack + marshal metadata so mid-run `__sync_state()` / host
 `sync_state(job)` can writeback Threadable/list/dict args into Python.
 
 Attributes:
-- thr: std::unique_ptr<cthreads::CThread> = pointer to the compiled cthreads threaded function
+- thr: dedicated CThread path (null when pooled)
 - result: std::shared_ptr<py::object> = pointer to the place to stash the result value(s)
 - state_mu: mutex stolen by host sync_state / held during writeback
 - pack / free_fn: args struct kept alive until final writeback
 - symbol / values_keep / meta_keep / types_keep / schemas_keep: marshal inputs
 - finished: true after final writeback (pack may already be freed)
+- pooled + done_*: completion signaling when thr is null (pool workers)
 
 Methods:
-- start(): void = calls start() on the compiled cthreads threaded function
-- join(): void = calls join() on the compiled cthreads threaded function
-- wait(): void = calls wait() on the compiled cthreads threaded function
-- done(): bool = calls done() on the compiled cthreads threaded function
+- start()/join()/wait()/done(): dedicated via CThread; pool via done_* (start no-op)
 - get_result(): py::object = returns the result value(s) (if no result, this returns py::none)
 - sync_state(): void = host steal of state_mu + writeback into Python
 */
@@ -97,10 +100,67 @@ struct SpawnedKernel {
     std::shared_ptr<py::dict> schemas_keep;
     bool finished = false;
 
-    void start() { thr->start(); }
-    void join() { thr->join(); }
-    void wait() { thr->wait(); }
-    bool done() { return thr->done(); }
+    // Pool path: no CThread; workers signal completion here.
+    bool pooled = false;
+    std::mutex done_mu;
+    std::condition_variable done_cv;
+    bool done_flag = false;
+    std::exception_ptr eptr;
+
+    void mark_done(std::exception_ptr e = nullptr) {
+        {
+            std::lock_guard<std::mutex> g(done_mu);
+            if (done_flag) {
+                return;
+            }
+            eptr = std::move(e);
+            done_flag = true;
+        }
+        done_cv.notify_all();
+        // Abandoned / never-ran: free pack (success path frees inside make_kernel_job).
+        if (!finished && pack && free_fn) {
+            std::lock_guard<std::mutex> g(state_mu);
+            if (!finished && pack && free_fn) {
+                free_fn(pack);
+                pack = nullptr;
+            }
+        }
+    }
+
+    void start() {
+        if (thr) {
+            thr->start();
+        }
+        // Pool jobs are queued at submit time; start is a no-op.
+    }
+    void join() {
+        if (thr) {
+            thr->join();
+            return;
+        }
+        {
+            std::unique_lock<std::mutex> g(done_mu);
+            done_cv.wait(g, [this] { return done_flag; });
+        }
+        if (eptr) {
+            std::rethrow_exception(eptr);
+        }
+    }
+    void wait() {
+        if (thr) {
+            thr->wait();
+            return;
+        }
+        std::unique_lock<std::mutex> g(done_mu);
+        done_cv.wait(g, [this] { return done_flag; });
+    }
+    bool done() {
+        if (thr) {
+            return thr->done();
+        }
+        std::lock_guard<std::mutex> g(done_mu);
+        return done_flag;
+    }
     py::object get_result() const {
         if (!result || !(*result)) {
             return py::none();
@@ -111,8 +171,9 @@ struct SpawnedKernel {
     // Host API: steal state_mu, writeback Threadables into Python, release.
     void sync_state();
 
+    // Safety net if the worker never ran / free was skipped.
+    // Pool keep-alive is via shared_ptr in the worker lambda (not a dtor wait).
     ~SpawnedKernel() {
-        // Safety net if the worker never ran / free was skipped.
         if (pack && free_fn) {
             free_fn(pack);
             pack = nullptr;
@@ -257,21 +318,82 @@ py::object read_return(py::dict meta, void* pack) {
 }
 
 
+using KernelCallFn = void (*)(void*);
+
 /**
-Collects args from the python side and prepares the pacck struct.
-Then builds the job object for the @Thread fn and merges it with the param pack.
-Finally threads the job and builds a SpawnedKernel object to hold the job and relevant data
+Build the runnable body for one SpawnedKernel (call + writeback + free pack).
+
+Same function is used by the dedicated CThread path and (later) pool.submit.
+``self`` must outlive the run (Python Job owns the SpawnedKernel).
+*/
+std::function<void()> make_kernel_job(
+    SpawnedKernel* self,
+    KernelCallFn call_fn,
+    std::shared_ptr<py::list> params_keep
+) {
+    return [call_fn, self, params_keep]() mutable {
+        // Install TLS context so codegen'd `__sync_state()` can writeback mid-run.
+        cthreads::detail::JobContext ctx{};
+        ctx.state_mu = &self->state_mu;
+        ctx.pack = self->pack;
+        ctx.symbol = &self->symbol;
+        ctx.params = params_keep.get();
+        ctx.values = self->values_keep.get();
+        ctx.types = self->types_keep.get();
+        ctx.schemas = self->schemas_keep.get();
+        ctx.do_writeback = &job_do_writeback;
+
+        set_job_context(&ctx);
+        try {
+            call_fn(self->pack); // kernels trampoline with packed args
+        } catch (...) {
+            set_job_context(nullptr);
+            throw;
+        }
+        set_job_context(nullptr);
+
+        {
+            // Acquire GIL for Python writeback; hold state_mu so host sync_state
+            // cannot race final writeback.
+            std::lock_guard<std::mutex> g(self->state_mu);
+            py::gil_scoped_acquire gil;
+            writeback_params(
+                self->symbol,
+                *params_keep,
+                *self->values_keep,
+                self->pack,
+                *self->types_keep,
+                *self->schemas_keep
+            );
+            *self->result = read_return(*self->meta_keep, self->pack);
+            if (self->pack && self->free_fn) {
+                self->free_fn(self->pack);
+                self->pack = nullptr;
+            }
+            self->finished = true;
+        }
+    };
+}
+
+
+/**
+Collects args from the python side and prepares the pack struct.
+Then builds the job body and either:
+  - dedicated: wraps it in a CThread (unstarted), or
+  - pool: submits it to ``pool`` (already queued; Job.start is a no-op).
 
 Args:
 - meta: the compile time metadata from __kernel_meta__
 - ordered_values: the actual python values (ordered to match params)
+- pool: null = dedicated CThread path; non-null = submit to this pool
 
 Returns:
-- std::unique_ptr<SpawnedKernel> = the spawned kernel object
+- std::shared_ptr<SpawnedKernel> = the spawned kernel object
 */
-std::unique_ptr<SpawnedKernel> spawn_from_meta(
+std::shared_ptr<SpawnedKernel> spawn_from_meta(
     py::dict meta,
-    py::list ordered_values
+    py::list ordered_values,
+    cthreads::pool::BasePool* pool = nullptr
 ) {
     // ensure that the kernel library is loaded 
     if (!cthreads::kernels().loaded()) {
@@ -342,7 +464,7 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
     FreeFn free_fn = cthreads::kernels().get<FreeFn>(free_sym.c_str()); // the function to free the pack struct
 
     // make a spawned kernel object to hold the job and relevant data
-    auto spawned = std::make_unique<SpawnedKernel>();
+    auto spawned = std::make_shared<SpawnedKernel>();
     spawned->result = result_slot;
     // own pack + marshal inputs for the full job lifetime (mid-run __sync_state / sync_state)
     spawned->pack = pack;
@@ -354,57 +476,39 @@ std::unique_ptr<SpawnedKernel> spawn_from_meta(
     spawned->schemas_keep = schemas_keep;
 
     SpawnedKernel* self = spawned.get(); // raw ptr for the worker lambda (spawned outlives the thread start)
-    // params_keep captured by value so the shared_ptr keeps the list alive with the lambda/job
-    auto params_keep_for_job = params_keep;
 
-    // create the cob object that runs the function, cleanes up and returns/updates the python side
-    auto job = [call_fn, self, params_keep_for_job]() mutable {
-        // Install TLS context so codegen'd `__sync_state()` can writeback mid-run.
-        cthreads::detail::JobContext ctx{};
-        ctx.state_mu = &self->state_mu;
-        ctx.pack = self->pack;
-        ctx.symbol = &self->symbol;
-        ctx.params = params_keep_for_job.get();
-        ctx.values = self->values_keep.get();
-        ctx.types = self->types_keep.get();
-        ctx.schemas = self->schemas_keep.get();
-        ctx.do_writeback = &job_do_writeback;
-
-        set_job_context(&ctx);
-        try {
-            call_fn(self->pack); // calls the kernels internal translated python fn with the packed args
-        } catch (...) {
-            set_job_context(nullptr);
-            throw;
-        }
-        set_job_context(nullptr);
-
-        {
-            // acuire the gil to write back the result to the python side
-            // also hold state_mu so host sync_state cannot race final writeback
-            std::lock_guard<std::mutex> g(self->state_mu);
-            py::gil_scoped_acquire gil;
-            // write back the result to the python side
-            writeback_params(
-                self->symbol,
-                *params_keep_for_job,
-                *self->values_keep,
-                self->pack,
-                *self->types_keep,
-                *self->schemas_keep
-            );
-            // read the return data and convert it to python object(s)
-            *self->result = read_return(*self->meta_keep, self->pack);
-            // free the pack struct (only after final writeback)
-            if (self->pack && self->free_fn) {
-                self->free_fn(self->pack);
-                self->pack = nullptr;
+    auto job = make_kernel_job(self, call_fn, params_keep);
+    if (pool) {
+        // Keep SpawnedKernel alive until the task runs or is dropped from the queue.
+        struct PoolTaskState {
+            std::shared_ptr<SpawnedKernel> spawned;
+            std::function<void()> job;
+            std::atomic<bool> started{false};
+            ~PoolTaskState() {
+                if (!started.load(std::memory_order_acquire) && spawned) {
+                    spawned->mark_done(std::make_exception_ptr(std::runtime_error(
+                        "cthreads.pool: job dropped (pool stopped before run)"
+                    )));
+                }
             }
-            self->finished = true;
-        }
-    };
-
-    spawned->thr = cthreads::CThread::thread(std::move(job)); // therad the job function and return the pointer to the cthreads::CThread object
+        };
+        auto st = std::make_shared<PoolTaskState>();
+        st->spawned = spawned;
+        st->job = std::move(job);
+        spawned->pooled = true;
+        pool->submit([st]() {
+            st->started.store(true, std::memory_order_release);
+            try {
+                st->job();
+                st->spawned->mark_done();
+            } catch (...) {
+                st->spawned->mark_done(std::current_exception());
+            }
+        });
+    } else {
+        // Dedicated path (unchanged): one OS thread via CThread.
+        spawned->thr = cthreads::CThread::thread(std::move(job));
+    }
     return spawned; // return the spawned kernel object
 }
 
@@ -528,7 +632,13 @@ std::uintptr_t tbuffer_native_ptr(py::object obj, py::object type_name_obj = py:
         "cthreads.tbuffer_native_ptr: unsupported triple-buffer object type");
 }
 
+#include "pool.tpp"
+
 } // namespace
+
+void bind_pool(py::module_& parent) {
+    bind_pool_impl(parent);
+}
 
 PYBIND11_MODULE(_ext, m) {
     m.doc() = "cthreads native core (_ext)";
@@ -581,7 +691,7 @@ PYBIND11_MODULE(_ext, m) {
         []() { g_ext_sync_invocations.store(0, std::memory_order_relaxed); }
     );
 
-    py::class_<SpawnedKernel, std::unique_ptr<SpawnedKernel>>(m, "Job")
+    py::class_<SpawnedKernel, std::shared_ptr<SpawnedKernel>>(m, "Job")
         .def("start", &SpawnedKernel::start)
         .def("join", &SpawnedKernel::join,
              py::call_guard<py::gil_scoped_release>())
@@ -600,7 +710,7 @@ PYBIND11_MODULE(_ext, m) {
     m.def(
         "thread",
         [](py::object fn, py::args args, const py::kwargs& kwargs)
-            -> std::unique_ptr<SpawnedKernel> {
+            -> std::shared_ptr<SpawnedKernel> {
             if (!py::hasattr(fn, "__threaded") || !fn.attr("__threaded").cast<bool>()) {
                 throw py::type_error(
                     "cthreads.thread: expected a @Thread function"
@@ -902,4 +1012,5 @@ PYBIND11_MODULE(_ext, m) {
     math.def("seed", &cthreads::math::seed, py::arg("s"));
 
     bind_linalg(m);
+    bind_pool(m);
 }

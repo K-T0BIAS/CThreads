@@ -18,6 +18,7 @@ def test_public_exports():
         "unload_kernels",
         "host_os",
         "VERSION",
+        "ThreadPool",
     ):
         assert hasattr(cthreads, name)
 
