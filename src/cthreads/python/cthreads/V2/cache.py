@@ -3,11 +3,35 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from pathlib import Path
 from typing import Any
 
 from .frontend.Registry import REGISTRY
+
+
+def sha256_text(*parts: str) -> str:
+    """Hash the text parts."""
+    h = hashlib.sha256()
+    for part in parts:
+        h.update(part.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def source_fingerprint(*objs: Any) -> str:
+    """Hash VERSION + getsource() for each object (class / function)."""
+    chunks = [REGISTRY.VERSION]
+    for obj in objs:
+        try:
+            chunks.append(inspect.getsource(obj))
+        except (OSError, TypeError):
+            chunks.append(repr(obj))
+        chunks.append(
+            getattr(obj, "__qualname__", getattr(obj, "__name__", ""))
+        )
+    return sha256_text(*chunks)
 
 CACHE_FILENAME = ".cthreads_cache.json"
 

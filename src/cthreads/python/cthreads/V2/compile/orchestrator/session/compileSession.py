@@ -6,7 +6,7 @@ from ..units import ThreadUnit, ThreadableUnit, Handle
 from ....frontend.Registry import REGISTRY
 from ....types import PyType, hint_to_pytype
 from ....kernel_meta import KERNELS, write_tbuffer_runtime
-from ....cache import ensure_gitignore
+from ....cache import ensure_gitignore, load_cache, save_cache
 
 
 class CompileSession:
@@ -16,7 +16,7 @@ class CompileSession:
     """
 
     @staticmethod
-    def compile() -> dict[str, Any]:
+    def compile(force: bool = False) -> dict[str, Any]:
         # ensure fresh registry / units / dispatch tables
         REGISTRY.threadable_units.clear()
         REGISTRY.thread_units.clear()
@@ -31,6 +31,8 @@ class CompileSession:
             sample = next(iter(REGISTRY.threads.values()))
         root = Path(inspect.getfile(sample)).resolve().parent
         ensure_gitignore(root)
+        cache = load_cache(root)
+        rewritten: list[str] = []
 
         claimed_methods: set[str] = set()
 
@@ -123,9 +125,12 @@ class CompileSession:
             REGISTRY.thread_units[qualname] = thread_unit
 
         for unit in REGISTRY.threadable_units.values():
-            unit.emit()
+            if unit.emit(force=force, cache=cache):
+                rewritten.append(unit.handle.name)
         for unit in REGISTRY.thread_units.values():
-            unit.emit()
+            if unit.emit(force=force, cache=cache):
+                rewritten.append(unit.handle.target.__name__)
 
         write_tbuffer_runtime(root)
-        return {"root": root}
+        save_cache(root, cache)
+        return {"root": root, "cache": cache, "rewritten": rewritten}

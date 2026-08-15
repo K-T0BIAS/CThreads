@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from .handle import Handle
 
@@ -13,8 +14,8 @@ class BaseUnit(ABC):
         self.validate()
 
     @abstractmethod
-    def emit(self) -> None:
-        """Emits the unit"""
+    def emit(self, *, force: bool = False, cache: dict[str, Any] | None = None) -> bool:
+        """Emit the unit. Returns True if generated files were rewritten."""
         pass
 
     @abstractmethod

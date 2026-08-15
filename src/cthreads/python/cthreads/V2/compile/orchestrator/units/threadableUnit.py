@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .baseUnit import BaseUnit
 from ....types import PyType
-from ....io import write_if_changed
+from ....cache import source_fingerprint, write_if_changed
 from ....kernel_meta import build_kernel_meta, emit_trampoline_cpp, emit_trampoline_decls
 from ...translation import include_for
 from ..session.export_macro import EXPORT_HPP
@@ -28,12 +28,34 @@ class ThreadableUnit(BaseUnit):
                 f"{self.handle.name} is not a @Threadable class"
             )
 
-    def emit(self) -> None:
-        """Write `__Threadable__/Name.{hpp,cpp}` for this class and its methods."""
+    def emit(self, *, force: bool = False, cache: dict[str, Any] | None = None) -> bool:
+        """Write ``__Threadable__/Name.{hpp,cpp}`` for this class and its methods."""
         from ...translation import translate_function
 
         name = self.handle.name
         cls = self.handle.target
+        method_fns = [m.handle.target for m in self.methods]
+        src_file = Path(self.handle.path)
+        thread_dir = src_file.parent / "__Thread__"
+        export_path = thread_dir / "cthreads_export.hpp"
+        src_hash = source_fingerprint(cls, *method_fns)
+        units = (cache or {}).setdefault("units", {})
+        cached = units.get(name, {})
+        outputs_ok = self.hpp_path.is_file() and self.cpp_path.is_file()
+
+        if (
+            not force
+            and outputs_ok
+            and cached.get("src_hash") == src_hash
+        ):
+            for fn in method_fns:
+                export = f"{name}_{fn.__name__}"
+                build_kernel_meta(
+                    fn, symbol=export, owner_name=name, owner_cls=cls
+                )
+            write_if_changed(export_path, EXPORT_HPP)
+            return False
+
         results = [
             translate_function(
                 method.handle.target,
@@ -112,9 +134,6 @@ class ThreadableUnit(BaseUnit):
             trampoline_decls.append(emit_trampoline_decls(meta))
             trampoline_defs.append(emit_trampoline_cpp(meta, real_call=export))
 
-        src_file = Path(self.handle.path)
-        thread_dir = src_file.parent / "__Thread__"
-        export_path = thread_dir / "cthreads_export.hpp"
         write_if_changed(export_path, EXPORT_HPP)
 
         hpp = "#pragma once\n\n"
@@ -143,5 +162,11 @@ class ThreadableUnit(BaseUnit):
         for block in trampoline_defs:
             cpp += "\n" + block
 
-        write_if_changed(self.hpp_path, hpp)
-        write_if_changed(self.cpp_path, cpp)
+        wrote_hpp = write_if_changed(self.hpp_path, hpp)
+        wrote_cpp = write_if_changed(self.cpp_path, cpp)
+        units[name] = {
+            "src_hash": src_hash,
+            "hpp": str(self.hpp_path),
+            "cpp": str(self.cpp_path),
+        }
+        return wrote_hpp or wrote_cpp

@@ -14,10 +14,10 @@ def compile(force: bool = False) -> dict:
     """
     Drain the V2 registry into units, emit C++, write tbuffer runtime.
 
-    ``force`` is accepted for API parity; unit emit always regenerates today.
+    Unchanged units (matching ``src_hash``) skip translate/emit and only
+    refresh kernel meta unless ``force`` is True.
     """
-    del force  # reserved for source-fingerprint skip later
-    return CompileSession.compile()
+    return CompileSession.compile(force=force)
 
 
 def prepare(force: bool = False) -> Path:
