@@ -22,8 +22,6 @@ Public usage::
         # read Threadable fields on the Python side
 """
 
-from __future__ import annotations
-
 import asyncio
 from typing import Any, Iterator
 
@@ -37,7 +35,7 @@ class Job:
         self._raw = raw
         self._started = False
 
-    def start(self) -> Job:
+    def start(self) -> "Job":
         if not self._started:
             self._raw.start()
             self._started = True

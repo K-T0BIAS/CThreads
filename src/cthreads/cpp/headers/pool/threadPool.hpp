@@ -6,11 +6,17 @@ namespace cthreads::pool {
     class ThreadPool : public BasePool {
         private:
             bool started{false};
+            int queue_limit;
 
         public:
-            ThreadPool(size_t capacity):
-                BasePool(capacity)
+            ThreadPool(size_t capacity, int queue_limit = -1):
+                BasePool(capacity),
+                queue_limit(queue_limit)
             {}
+
+            int get_queue_limit() const {
+                return this->queue_limit;
+            }
 
             ~ThreadPool() {
                 this->stop();
@@ -87,6 +93,9 @@ namespace cthreads::pool {
                     }
                     if (stop_signal.load()) {
                         throw std::runtime_error("ThreadPool is stopping");
+                    }
+                    if (this->queue_limit > 0 && this->tasks_queue.size() >= this->queue_limit) {
+                        throw std::runtime_error("ThreadPool queue limit reached");
                     }
                     this->tasks_queue.push(std::move(func));
                 }

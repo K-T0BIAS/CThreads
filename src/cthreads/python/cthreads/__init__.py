@@ -40,6 +40,7 @@ from .sync import (
     tbuffer_free_read_copy,
 )
 from .pool.threadPool import ThreadPool
+from .pool.group import JobGroup
 from .kernel_meta import KERNELS
 from . import runtime
 from . import _ext_api
@@ -103,6 +104,7 @@ __all__ = [
     "VERSION",
     "REGISTRY",
     "ThreadPool",
+    "JobGroup",
 ]
 
 

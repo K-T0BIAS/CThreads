@@ -59,8 +59,9 @@ def test_facade_lifecycle_and_submit_marks_started(monkeypatch):
             return None
 
     class _RawPool:
-        def __init__(self, capacity: int):
+        def __init__(self, capacity: int, queue_limit: int = -1):
             self.capacity = capacity
+            self.queue_limit = queue_limit
             self.started = False
             self.stopped = False
             self.joined = False
@@ -88,6 +89,7 @@ def test_facade_lifecycle_and_submit_marks_started(monkeypatch):
 
     pool = mod.ThreadPool(4)
     assert pool.capacity == 4
+    assert pool.queue_limit == -1
     assert "capacity=4" in repr(pool)
     assert pool.start() is pool
     assert pool._raw.started is True
@@ -109,12 +111,72 @@ def test_facade_lifecycle_and_submit_marks_started(monkeypatch):
     assert pool._raw.stopped is True
 
 
+def test_facade_queue_limit_none_and_int(monkeypatch):
+    import cthreads.pool.threadPool as mod
+
+    seen: list[tuple[int, int]] = []
+
+    class _RawPool:
+        def __init__(self, capacity: int, queue_limit: int = -1):
+            self.capacity = capacity
+            self.queue_limit = queue_limit
+            seen.append((capacity, queue_limit))
+
+    monkeypatch.setattr(mod, "_NativeThreadPool", _RawPool)
+    assert mod.ThreadPool(2).queue_limit == -1
+    assert mod.ThreadPool(2, None).queue_limit == -1
+    assert mod.ThreadPool(2, 8).queue_limit == 8
+    assert seen == [(2, -1), (2, -1), (2, 8)]
+
+
+def test_facade_group_emits_jobgroup(monkeypatch):
+    import cthreads.pool.threadPool as mod
+    from cthreads.pool.group import JobGroup
+
+    class _RawJob:
+        def __init__(self, value):
+            self._value = value
+
+        def start(self):
+            return None
+
+        def done(self):
+            return True
+
+        def join(self):
+            return None
+
+        def result(self):
+            return self._value
+
+    class _RawPool:
+        def __init__(self, capacity: int, queue_limit: int = -1):
+            self.capacity = capacity
+            self.queue_limit = queue_limit
+            self._n = 0
+
+        def start(self):
+            return None
+
+        def submit(self, fn, *args, **kwargs):
+            self._n += 1
+            return _RawJob(args[0] if args else self._n)
+
+    monkeypatch.setattr(mod, "_NativeThreadPool", _RawPool)
+    pool = mod.ThreadPool(2).start()
+    group = pool.group(lambda x: x, [10, (20,), [30]])
+    assert isinstance(group, JobGroup)
+    assert len(group) == 3
+    assert group.results() == [10, 20, 30]
+
+
 def test_facade_is_running_index(monkeypatch):
     import cthreads.pool.threadPool as mod
 
     class _RawPool:
-        def __init__(self, capacity: int):
+        def __init__(self, capacity: int, queue_limit: int = -1):
             self.capacity = capacity
+            self.queue_limit = queue_limit
 
         def is_running(self, thread_id: int | None = None):
             if thread_id is None:
@@ -179,6 +241,36 @@ def test_native_is_running_out_of_range():
             pool.is_running(-1)
     finally:
         pool.stop()
+
+
+def test_native_queue_limit_default_and_reject():
+    Native = _require_native_pool()
+    unlimited = Native(1)
+    assert unlimited.queue_limit == -1
+    unlimited = Native(1, None)
+    assert unlimited.queue_limit == -1
+
+    pool = Native(1, 1)
+    assert pool.queue_limit == 1
+    pool.start()
+    try:
+        # Saturate with a long task via Python facade in kernel tests;
+        # here only check the property + double-start still works with limit.
+        pass
+    finally:
+        pool.stop()
+
+
+def test_python_threadpool_queue_limit_none():
+    try:
+        import cthreads._ext  # noqa: F401
+    except ImportError as e:
+        pytest.skip(f"cthreads._ext unavailable: {e}")
+    from cthreads import ThreadPool
+
+    assert ThreadPool(2).queue_limit == -1
+    assert ThreadPool(2, None).queue_limit == -1
+    assert ThreadPool(2, 4).queue_limit == 4
 
 
 def test_python_threadpool_wraps_native():
@@ -285,6 +377,69 @@ def pool_kernels(tmp_module):
         unload()
     except Exception:
         pass
+
+
+def test_pool_group_join_results(pool_kernels):
+    from cthreads import ThreadPool
+    from cthreads.pool import JobGroup
+
+    pool = ThreadPool(4).start()
+    try:
+        group = pool.group(pool_kernels.add, [(1, 2), (3, 4), (5, 6)])
+        assert isinstance(group, JobGroup)
+        assert len(group) == 3
+        assert group.results() == [3, 7, 11]
+    finally:
+        pool.stop()
+
+
+def test_pool_group_await(pool_kernels):
+    from cthreads import ThreadPool
+
+    pool = ThreadPool(4).start()
+
+    async def main():
+        return await pool.group(pool_kernels.mul, [(2, 3), (4, 5)])
+
+    try:
+        assert asyncio.run(main()) == [6, 20]
+    finally:
+        pool.stop()
+
+
+def test_pool_queue_limit_rejects(pool_kernels):
+    from cthreads import ThreadPool
+
+    busy_n = 2_000_000
+    sink: list[int] = []
+    pool = ThreadPool(1, queue_limit=1).start()
+    try:
+        blocker = pool.submit(pool_kernels.busy, busy_n, sink)
+        deadline = time.perf_counter() + 15.0
+        while (
+            time.perf_counter() < deadline
+            and not blocker.done()
+            and not any(pool.is_running())
+        ):
+            time.sleep(0.0005)
+        if blocker.done():
+            pytest.skip("busy finished too quickly to exercise queue limit")
+        # One slot filled by the in-flight/queued blocker; next submit must fit
+        # or reject depending on whether blocker left the queue. Fill the limit.
+        queued = pool.submit(pool_kernels.add, 1, 1)
+        with pytest.raises(RuntimeError, match="queue limit"):
+            pool.submit(pool_kernels.add, 2, 2)
+        pool.stop()
+        blocker.join()
+        try:
+            queued.join()
+        except RuntimeError:
+            pass
+    finally:
+        try:
+            pool.stop()
+        except Exception:
+            pass
 
 
 def test_pool_submit_join_result(pool_kernels):

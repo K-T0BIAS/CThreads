@@ -19,6 +19,7 @@ def test_public_exports():
         "host_os",
         "VERSION",
         "ThreadPool",
+        "JobGroup",
     ):
         assert hasattr(cthreads, name)
 

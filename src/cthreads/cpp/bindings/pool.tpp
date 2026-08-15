@@ -21,9 +21,17 @@ inline void bind_pool_impl(py::module_& parent) {
 
     py::class_<cthreads::pool::ThreadPool>(pool, "ThreadPool")
         .def(
-            py::init<size_t>(),
+            py::init([](size_t capacity, py::object queue_limit) {
+                int lim = -1;
+                if (!queue_limit.is_none()) {
+                    lim = queue_limit.cast<int>();
+                }
+                return new cthreads::pool::ThreadPool(capacity, lim);
+            }),
             py::arg("capacity"),
-            "Create a fixed-size pool (call start() before submit)."
+            py::arg("queue_limit") = py::none(),
+            "Create a fixed-size pool (call start() before submit). "
+            "queue_limit=None/-1 means unlimited pending tasks."
         )
         .def(
             "start",
@@ -45,6 +53,10 @@ inline void bind_pool_impl(py::module_& parent) {
         .def_property_readonly(
             "capacity",
             &cthreads::pool::ThreadPool::get_capacity
+        )
+        .def_property_readonly(
+            "queue_limit",
+            &cthreads::pool::ThreadPool::get_queue_limit
         )
         .def(
             "is_running",
