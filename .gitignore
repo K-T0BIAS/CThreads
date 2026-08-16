@@ -44,3 +44,4 @@ src/cthreads/cpp/src/
 #temp ignores
 docs/
 demo/
+*.csv

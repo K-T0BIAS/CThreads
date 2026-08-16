@@ -5,12 +5,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #ifdef __AVX2__ // if available use the avx2 intrinsics for vectorization
 #include <immintrin.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #endif
 
 namespace cthreads::linalg {
@@ -142,25 +147,62 @@ MatmulSpec resolve_matmul(const Shape& a, const Shape& b) {
 // Copy logical elements (row-major order of src.shape) into a new dense C-contiguous array.
 template<typename T>
 Array<T> copy_to_contiguous(const Array<T>& src, const Shape& new_shape) {
+    
     if (src.shape().numel() != new_shape.numel()) {
         throw std::runtime_error("copy_to_contiguous: shape numel mismatch");
     }
+    // if the source is already contiguous, just return a new array with a data copy
+    if (src.is_contiguous()) {
+        auto arr = Array<T>(new_shape);
+        std::copy(src.data(), src.data() + src.shape().numel(), arr.data());
+        return arr;
+    }
+
     Array<T> out(new_shape);
     const size_t n = new_shape.numel();
     if (n == 0) {
         return out;
     }
+
+    // Largest trailing run whose element strides match C-order (skip size-1 axes).
     const Shape& src_shape = src.shape();
+    const Shape& src_strides = src.strides();
     const size_t nd = src_shape.ndim();
+    size_t segment = 1;
+    size_t expected = 1;
+    int last_outer = static_cast<int>(nd) - 1;
+    for (; last_outer >= 0; --last_outer) {
+        const size_t dim = src_shape[static_cast<size_t>(last_outer)];
+        if (dim <= 1) {
+            continue;
+        }
+        if (src_strides[static_cast<size_t>(last_outer)] != expected) {
+            break;
+        }
+        segment *= dim;
+        expected *= dim;
+    }
+
+    T* dst = out.data();
+    const T* base = src.data(); // view start (offset already applied)
     std::vector<size_t> idx(nd, 0);
-    for (size_t flat = 0; flat < n; ++flat) {
-        out[flat] = src[Shape(idx)];
-        for (int d = static_cast<int>(nd) - 1; d >= 0; --d) {
-            ++idx[static_cast<size_t>(d)];
-            if (idx[static_cast<size_t>(d)] < src_shape[static_cast<size_t>(d)]) {
+    for (size_t done = 0; done < n; done += segment) {
+        size_t src_off = 0;
+        for (size_t i = 0; i < nd; ++i) {
+            src_off += idx[i] * src_strides[i];
+        }
+        if (segment == 1) {
+            dst[done] = base[src_off];
+        } else {
+            std::memcpy(dst + done, base + src_off, segment * sizeof(T));
+        }
+        for (int d = last_outer; d >= 0; --d) {
+            const size_t ud = static_cast<size_t>(d);
+            ++idx[ud];
+            if (idx[ud] < src_shape[ud]) {
                 break;
             }
-            idx[static_cast<size_t>(d)] = 0;
+            idx[ud] = 0;
         }
     }
     return out;
@@ -208,16 +250,46 @@ Shape gathered_shape(const Shape& a, size_t mask_ndim, size_t count) {
     return Shape(dims);
 }
 
+inline int popcnt32(unsigned v) {
+#if defined(_MSC_VER)
+    return static_cast<int>(__popcnt(v));
+#else
+    return __builtin_popcount(v);
+#endif
+}
+
+size_t count_bytes_nonzero(const uint8_t* p, size_t n) {
+    size_t c = 0;
+#ifdef __AVX2__
+    size_t i = 0;
+    __m256i acc = _mm256_setzero_si256();
+    const __m256i z = _mm256_setzero_si256();
+    const __m256i one = _mm256_set1_epi8(1);
+    for (; i + 32 <= n; i += 32) {
+        const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + i));
+        const __m256i ones = _mm256_andnot_si256(_mm256_cmpeq_epi8(v, z), one);
+        acc = _mm256_add_epi64(acc, _mm256_sad_epu8(ones, z));
+    }
+    alignas(32) uint64_t lanes[4];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), acc);
+    c = lanes[0] + lanes[1] + lanes[2] + lanes[3];
+    for (; i < n; ++i) {
+        c += p[i] ? 1 : 0;
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        c += p[i] ? 1 : 0;
+    }
+#endif
+    return c;
+}
+
 size_t count_true(const Array<uint8_t>& mask) {
     const size_t n = mask.shape().numel();
-    size_t c = 0;
     if (mask.is_contiguous()) {
-        const uint8_t* p = mask.data();
-        for (size_t i = 0; i < n; ++i) {
-            c += p[i] ? 1 : 0;
-        }
-        return c;
+        return count_bytes_nonzero(mask.data(), n);
     }
+    size_t c = 0;
     std::vector<size_t> idx(mask.ndim(), 0);
     for (size_t t = 0; t < n; ++t) {
         if (mask[Shape(idx)]) {
@@ -309,29 +381,66 @@ void write_slab(Array<T>& dest, const std::vector<size_t>& prefix, const Array<T
     }
 }
 
-template<typename T, typename Pred>
-Array<uint8_t> compare_walk(const Array<T>& a, Pred pred) {
-    Array<uint8_t> out(a.shape());
-    const size_t n = a.shape().numel();
-    if (a.is_contiguous()) {
-        const T* p = a.data();
-        uint8_t* o = out.data();
-        for (size_t i = 0; i < n; ++i) {
-            o[i] = pred(p[i]) ? 1 : 0;
-        }
-        return out;
+enum class CmpOp { Eq, Ne, Lt, Le, Gt, Ge };
+
+template<typename T>
+bool cmp_scalar(T x, T y, CmpOp op) {
+    switch (op) {
+        case CmpOp::Eq: return x == y;
+        case CmpOp::Ne: return x != y;
+        case CmpOp::Lt: return x < y;
+        case CmpOp::Le: return x <= y;
+        case CmpOp::Gt: return x > y;
+        case CmpOp::Ge: return x >= y;
     }
-    std::vector<size_t> idx(a.ndim(), 0);
-    for (size_t t = 0; t < n; ++t) {
-        const Shape s(idx);
-        out[s] = pred(a[s]) ? 1 : 0;
-        bump_index(idx, a.shape());
-    }
-    return out;
+    return false;
 }
 
-template<typename T, typename Pred>
-Array<uint8_t> compare_walk(const Array<T>& a, const Array<T>& b, Pred pred) {
+#ifdef __AVX2__
+inline void store_f32_cmp_mask_u8(uint8_t* o, __m256 cmp) {
+    const __m256i v = _mm256_and_si256(_mm256_castps_si256(cmp), _mm256_set1_epi32(1));
+    const __m128i lo = _mm256_castsi256_si128(v);
+    const __m128i hi = _mm256_extracti128_si256(v, 1);
+    const __m128i p16 = _mm_packs_epi32(lo, hi);
+    const __m128i p8 = _mm_packs_epi16(p16, p16);
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(o), p8);
+}
+
+inline void store_f64_cmp_mask_u8(uint8_t* o, __m256d cmp) {
+    const int bits = _mm256_movemask_pd(cmp);
+    o[0] = static_cast<uint8_t>(bits & 1);
+    o[1] = static_cast<uint8_t>((bits >> 1) & 1);
+    o[2] = static_cast<uint8_t>((bits >> 2) & 1);
+    o[3] = static_cast<uint8_t>((bits >> 3) & 1);
+}
+
+inline __m256 cmp_ps_op(__m256 a, __m256 b, CmpOp op) {
+    switch (op) {
+        case CmpOp::Eq: return _mm256_cmp_ps(a, b, _CMP_EQ_OQ);
+        case CmpOp::Ne: return _mm256_cmp_ps(a, b, _CMP_NEQ_OQ);
+        case CmpOp::Lt: return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
+        case CmpOp::Le: return _mm256_cmp_ps(a, b, _CMP_LE_OQ);
+        case CmpOp::Gt: return _mm256_cmp_ps(a, b, _CMP_GT_OQ);
+        case CmpOp::Ge: return _mm256_cmp_ps(a, b, _CMP_GE_OQ);
+    }
+    return _mm256_setzero_ps();
+}
+
+inline __m256d cmp_pd_op(__m256d a, __m256d b, CmpOp op) {
+    switch (op) {
+        case CmpOp::Eq: return _mm256_cmp_pd(a, b, _CMP_EQ_OQ);
+        case CmpOp::Ne: return _mm256_cmp_pd(a, b, _CMP_NEQ_OQ);
+        case CmpOp::Lt: return _mm256_cmp_pd(a, b, _CMP_LT_OQ);
+        case CmpOp::Le: return _mm256_cmp_pd(a, b, _CMP_LE_OQ);
+        case CmpOp::Gt: return _mm256_cmp_pd(a, b, _CMP_GT_OQ);
+        case CmpOp::Ge: return _mm256_cmp_pd(a, b, _CMP_GE_OQ);
+    }
+    return _mm256_setzero_pd();
+}
+#endif
+
+template<typename T>
+Array<uint8_t> compare_arrays(const Array<T>& a, const Array<T>& b, CmpOp op) {
     if (a.shape() != b.shape()) {
         throw std::runtime_error("compare: shape mismatch");
     }
@@ -341,15 +450,86 @@ Array<uint8_t> compare_walk(const Array<T>& a, const Array<T>& b, Pred pred) {
         const T* pa = a.data();
         const T* pb = b.data();
         uint8_t* o = out.data();
+#ifdef __AVX2__
+        if constexpr (std::is_same_v<T, float>) {
+            size_t i = 0;
+            for (; i + 8 <= n; i += 8) {
+                store_f32_cmp_mask_u8(
+                    o + i,
+                    cmp_ps_op(_mm256_loadu_ps(pa + i), _mm256_loadu_ps(pb + i), op)
+                );
+            }
+            for (; i < n; ++i) {
+                o[i] = cmp_scalar(pa[i], pb[i], op) ? 1 : 0;
+            }
+            return out;
+        } else if constexpr (std::is_same_v<T, double>) {
+            size_t i = 0;
+            for (; i + 4 <= n; i += 4) {
+                store_f64_cmp_mask_u8(
+                    o + i,
+                    cmp_pd_op(_mm256_loadu_pd(pa + i), _mm256_loadu_pd(pb + i), op)
+                );
+            }
+            for (; i < n; ++i) {
+                o[i] = cmp_scalar(pa[i], pb[i], op) ? 1 : 0;
+            }
+            return out;
+        }
+#endif
         for (size_t i = 0; i < n; ++i) {
-            o[i] = pred(pa[i], pb[i]) ? 1 : 0;
+            o[i] = cmp_scalar(pa[i], pb[i], op) ? 1 : 0;
         }
         return out;
     }
     std::vector<size_t> idx(a.ndim(), 0);
     for (size_t t = 0; t < n; ++t) {
         const Shape s(idx);
-        out[s] = pred(a[s], b[s]) ? 1 : 0;
+        out[s] = cmp_scalar(a[s], b[s], op) ? 1 : 0;
+        bump_index(idx, a.shape());
+    }
+    return out;
+}
+
+template<typename T>
+Array<uint8_t> compare_value(const Array<T>& a, T value, CmpOp op) {
+    Array<uint8_t> out(a.shape());
+    const size_t n = a.shape().numel();
+    if (a.is_contiguous()) {
+        const T* p = a.data();
+        uint8_t* o = out.data();
+#ifdef __AVX2__
+        if constexpr (std::is_same_v<T, float>) {
+            const __m256 vb = _mm256_set1_ps(value);
+            size_t i = 0;
+            for (; i + 8 <= n; i += 8) {
+                store_f32_cmp_mask_u8(o + i, cmp_ps_op(_mm256_loadu_ps(p + i), vb, op));
+            }
+            for (; i < n; ++i) {
+                o[i] = cmp_scalar(p[i], value, op) ? 1 : 0;
+            }
+            return out;
+        } else if constexpr (std::is_same_v<T, double>) {
+            const __m256d vb = _mm256_set1_pd(value);
+            size_t i = 0;
+            for (; i + 4 <= n; i += 4) {
+                store_f64_cmp_mask_u8(o + i, cmp_pd_op(_mm256_loadu_pd(p + i), vb, op));
+            }
+            for (; i < n; ++i) {
+                o[i] = cmp_scalar(p[i], value, op) ? 1 : 0;
+            }
+            return out;
+        }
+#endif
+        for (size_t i = 0; i < n; ++i) {
+            o[i] = cmp_scalar(p[i], value, op) ? 1 : 0;
+        }
+        return out;
+    }
+    std::vector<size_t> idx(a.ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        const Shape s(idx);
+        out[s] = cmp_scalar(a[s], value, op) ? 1 : 0;
         bump_index(idx, a.shape());
     }
     return out;
@@ -617,6 +797,301 @@ void Array<T>::_fast_matmul_scalar(Array& out, const Array& lhs, const Array& rh
     }
 }
 
+namespace {
+
+// Cache panels + register microkernel (f32 4x16 / f64 4x8). No L1 probe.
+// Larger Kc/Nc amortize pack cost on mid/large GEMM (aim: panels fit L2).
+constexpr size_t kGemmMc = 64;
+constexpr size_t kGemmNc = 256;
+constexpr size_t kGemmKc = 256;
+constexpr size_t kGemmMr = 4;
+
+#ifdef __AVX2__
+constexpr size_t kGemmNrF32 = 16;
+constexpr size_t kGemmNrF64 = 8;
+
+// C[4 x 16] += A_pack[4 x kc] @ B_pack[kc x nc] at column offset jj (nr=16).
+// first_k: beta=0 (zero acc) — out is freshly allocated zeros on the first Kc panel.
+void gemm_kernel_f32_4x16(
+    float* c,
+    size_t ldc,
+    const float* a_pack,
+    const float* b_pack,
+    size_t kc,
+    size_t nc,
+    size_t jj,
+    bool first_k
+) {
+    __m256 c00, c01, c10, c11, c20, c21, c30, c31;
+    if (first_k) {
+        c00 = c01 = c10 = c11 = c20 = c21 = c30 = c31 = _mm256_setzero_ps();
+    } else {
+        c00 = _mm256_loadu_ps(c + 0 * ldc + jj);
+        c01 = _mm256_loadu_ps(c + 0 * ldc + jj + 8);
+        c10 = _mm256_loadu_ps(c + 1 * ldc + jj);
+        c11 = _mm256_loadu_ps(c + 1 * ldc + jj + 8);
+        c20 = _mm256_loadu_ps(c + 2 * ldc + jj);
+        c21 = _mm256_loadu_ps(c + 2 * ldc + jj + 8);
+        c30 = _mm256_loadu_ps(c + 3 * ldc + jj);
+        c31 = _mm256_loadu_ps(c + 3 * ldc + jj + 8);
+    }
+    for (size_t k = 0; k < kc; ++k) {
+        const __m256 b0 = _mm256_loadu_ps(b_pack + k * nc + jj);
+        const __m256 b1 = _mm256_loadu_ps(b_pack + k * nc + jj + 8);
+        const __m256 a0 = _mm256_set1_ps(a_pack[0 * kc + k]);
+        const __m256 a1 = _mm256_set1_ps(a_pack[1 * kc + k]);
+        const __m256 a2 = _mm256_set1_ps(a_pack[2 * kc + k]);
+        const __m256 a3 = _mm256_set1_ps(a_pack[3 * kc + k]);
+        c00 = _mm256_fmadd_ps(a0, b0, c00);
+        c01 = _mm256_fmadd_ps(a0, b1, c01);
+        c10 = _mm256_fmadd_ps(a1, b0, c10);
+        c11 = _mm256_fmadd_ps(a1, b1, c11);
+        c20 = _mm256_fmadd_ps(a2, b0, c20);
+        c21 = _mm256_fmadd_ps(a2, b1, c21);
+        c30 = _mm256_fmadd_ps(a3, b0, c30);
+        c31 = _mm256_fmadd_ps(a3, b1, c31);
+    }
+    _mm256_storeu_ps(c + 0 * ldc + jj, c00);
+    _mm256_storeu_ps(c + 0 * ldc + jj + 8, c01);
+    _mm256_storeu_ps(c + 1 * ldc + jj, c10);
+    _mm256_storeu_ps(c + 1 * ldc + jj + 8, c11);
+    _mm256_storeu_ps(c + 2 * ldc + jj, c20);
+    _mm256_storeu_ps(c + 2 * ldc + jj + 8, c21);
+    _mm256_storeu_ps(c + 3 * ldc + jj, c30);
+    _mm256_storeu_ps(c + 3 * ldc + jj + 8, c31);
+}
+
+void gemm_kernel_f32_1x16(
+    float* c_row,
+    const float* a_pack,
+    const float* b_pack,
+    size_t kc,
+    size_t nc,
+    size_t jj,
+    bool first_k
+) {
+    __m256 c0 = first_k ? _mm256_setzero_ps() : _mm256_loadu_ps(c_row + jj);
+    __m256 c1 = first_k ? _mm256_setzero_ps() : _mm256_loadu_ps(c_row + jj + 8);
+    for (size_t k = 0; k < kc; ++k) {
+        const __m256 b0 = _mm256_loadu_ps(b_pack + k * nc + jj);
+        const __m256 b1 = _mm256_loadu_ps(b_pack + k * nc + jj + 8);
+        const __m256 av = _mm256_set1_ps(a_pack[k]);
+        c0 = _mm256_fmadd_ps(av, b0, c0);
+        c1 = _mm256_fmadd_ps(av, b1, c1);
+    }
+    _mm256_storeu_ps(c_row + jj, c0);
+    _mm256_storeu_ps(c_row + jj + 8, c1);
+}
+
+void gemm_kernel_f64_4x8(
+    double* c,
+    size_t ldc,
+    const double* a_pack,
+    const double* b_pack,
+    size_t kc,
+    size_t nc,
+    size_t jj,
+    bool first_k
+) {
+    __m256d c00, c01, c10, c11, c20, c21, c30, c31;
+    if (first_k) {
+        c00 = c01 = c10 = c11 = c20 = c21 = c30 = c31 = _mm256_setzero_pd();
+    } else {
+        c00 = _mm256_loadu_pd(c + 0 * ldc + jj);
+        c01 = _mm256_loadu_pd(c + 0 * ldc + jj + 4);
+        c10 = _mm256_loadu_pd(c + 1 * ldc + jj);
+        c11 = _mm256_loadu_pd(c + 1 * ldc + jj + 4);
+        c20 = _mm256_loadu_pd(c + 2 * ldc + jj);
+        c21 = _mm256_loadu_pd(c + 2 * ldc + jj + 4);
+        c30 = _mm256_loadu_pd(c + 3 * ldc + jj);
+        c31 = _mm256_loadu_pd(c + 3 * ldc + jj + 4);
+    }
+    for (size_t k = 0; k < kc; ++k) {
+        const __m256d b0 = _mm256_loadu_pd(b_pack + k * nc + jj);
+        const __m256d b1 = _mm256_loadu_pd(b_pack + k * nc + jj + 4);
+        const __m256d a0 = _mm256_set1_pd(a_pack[0 * kc + k]);
+        const __m256d a1 = _mm256_set1_pd(a_pack[1 * kc + k]);
+        const __m256d a2 = _mm256_set1_pd(a_pack[2 * kc + k]);
+        const __m256d a3 = _mm256_set1_pd(a_pack[3 * kc + k]);
+        c00 = _mm256_fmadd_pd(a0, b0, c00);
+        c01 = _mm256_fmadd_pd(a0, b1, c01);
+        c10 = _mm256_fmadd_pd(a1, b0, c10);
+        c11 = _mm256_fmadd_pd(a1, b1, c11);
+        c20 = _mm256_fmadd_pd(a2, b0, c20);
+        c21 = _mm256_fmadd_pd(a2, b1, c21);
+        c30 = _mm256_fmadd_pd(a3, b0, c30);
+        c31 = _mm256_fmadd_pd(a3, b1, c31);
+    }
+    _mm256_storeu_pd(c + 0 * ldc + jj, c00);
+    _mm256_storeu_pd(c + 0 * ldc + jj + 4, c01);
+    _mm256_storeu_pd(c + 1 * ldc + jj, c10);
+    _mm256_storeu_pd(c + 1 * ldc + jj + 4, c11);
+    _mm256_storeu_pd(c + 2 * ldc + jj, c20);
+    _mm256_storeu_pd(c + 2 * ldc + jj + 4, c21);
+    _mm256_storeu_pd(c + 3 * ldc + jj, c30);
+    _mm256_storeu_pd(c + 3 * ldc + jj + 4, c31);
+}
+
+void gemm_kernel_f64_1x8(
+    double* c_row,
+    const double* a_pack,
+    const double* b_pack,
+    size_t kc,
+    size_t nc,
+    size_t jj,
+    bool first_k
+) {
+    __m256d c0 = first_k ? _mm256_setzero_pd() : _mm256_loadu_pd(c_row + jj);
+    __m256d c1 = first_k ? _mm256_setzero_pd() : _mm256_loadu_pd(c_row + jj + 4);
+    for (size_t k = 0; k < kc; ++k) {
+        const __m256d b0 = _mm256_loadu_pd(b_pack + k * nc + jj);
+        const __m256d b1 = _mm256_loadu_pd(b_pack + k * nc + jj + 4);
+        const __m256d av = _mm256_set1_pd(a_pack[k]);
+        c0 = _mm256_fmadd_pd(av, b0, c0);
+        c1 = _mm256_fmadd_pd(av, b1, c1);
+    }
+    _mm256_storeu_pd(c_row + jj, c0);
+    _mm256_storeu_pd(c_row + jj + 4, c1);
+}
+#endif
+
+// Contiguous row-major GEMM: C(MxN) += A(MxK) @ B(KxN).
+// Panel pack + 4x16/4x8 microkernel; thread_local Mc×Kc / Kc×Nc scratch (lower peak RAM than A-once).
+template<typename T>
+void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, size_t N) {
+    thread_local std::vector<T> a_pack_tl;
+    thread_local std::vector<T> b_pack_tl;
+    a_pack_tl.resize(kGemmMc * kGemmKc);
+    b_pack_tl.resize(kGemmKc * kGemmNc);
+    T* a_pack = a_pack_tl.data();
+    T* b_pack = b_pack_tl.data();
+
+    for (size_t j0 = 0; j0 < N; j0 += kGemmNc) {
+        const size_t nc = std::min(kGemmNc, N - j0);
+        for (size_t k0 = 0; k0 < K; k0 += kGemmKc) {
+            const size_t kc = std::min(kGemmKc, K - k0);
+            const bool first_k = (k0 == 0);
+
+            for (size_t k = 0; k < kc; ++k) {
+                std::memcpy(
+                    b_pack + k * nc,
+                    b + (k0 + k) * N + j0,
+                    nc * sizeof(T)
+                );
+            }
+
+            for (size_t i0 = 0; i0 < M; i0 += kGemmMc) {
+                const size_t mc = std::min(kGemmMc, M - i0);
+                for (size_t i = 0; i < mc; ++i) {
+                    std::memcpy(
+                        a_pack + i * kc,
+                        a + (i0 + i) * K + k0,
+                        kc * sizeof(T)
+                    );
+                }
+
+#ifdef __AVX2__
+                if constexpr (std::is_same_v<T, float>) {
+                    size_t ii = 0;
+                    for (; ii + kGemmMr <= mc; ii += kGemmMr) {
+                        float* c_block = c + (i0 + ii) * N + j0;
+                        const float* ap = a_pack + ii * kc;
+                        size_t jj = 0;
+                        for (; jj + kGemmNrF32 <= nc; jj += kGemmNrF32) {
+                            gemm_kernel_f32_4x16(c_block, N, ap, b_pack, kc, nc, jj, first_k);
+                        }
+                        for (; jj < nc; ++jj) {
+                            for (size_t r = 0; r < kGemmMr; ++r) {
+                                float sum = first_k ? 0.f : c_block[r * N + jj];
+                                for (size_t k = 0; k < kc; ++k) {
+                                    sum += ap[r * kc + k] * b_pack[k * nc + jj];
+                                }
+                                c_block[r * N + jj] = sum;
+                            }
+                        }
+                    }
+                    for (; ii < mc; ++ii) {
+                        float* c_row = c + (i0 + ii) * N + j0;
+                        const float* ap = a_pack + ii * kc;
+                        size_t jj = 0;
+                        for (; jj + kGemmNrF32 <= nc; jj += kGemmNrF32) {
+                            gemm_kernel_f32_1x16(c_row, ap, b_pack, kc, nc, jj, first_k);
+                        }
+                        for (; jj < nc; ++jj) {
+                            float sum = first_k ? 0.f : c_row[jj];
+                            for (size_t k = 0; k < kc; ++k) {
+                                sum += ap[k] * b_pack[k * nc + jj];
+                            }
+                            c_row[jj] = sum;
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, double>) {
+                    size_t ii = 0;
+                    for (; ii + kGemmMr <= mc; ii += kGemmMr) {
+                        double* c_block = c + (i0 + ii) * N + j0;
+                        const double* ap = a_pack + ii * kc;
+                        size_t jj = 0;
+                        for (; jj + kGemmNrF64 <= nc; jj += kGemmNrF64) {
+                            gemm_kernel_f64_4x8(c_block, N, ap, b_pack, kc, nc, jj, first_k);
+                        }
+                        for (; jj < nc; ++jj) {
+                            for (size_t r = 0; r < kGemmMr; ++r) {
+                                double sum = first_k ? 0.0 : c_block[r * N + jj];
+                                for (size_t k = 0; k < kc; ++k) {
+                                    sum += ap[r * kc + k] * b_pack[k * nc + jj];
+                                }
+                                c_block[r * N + jj] = sum;
+                            }
+                        }
+                    }
+                    for (; ii < mc; ++ii) {
+                        double* c_row = c + (i0 + ii) * N + j0;
+                        const double* ap = a_pack + ii * kc;
+                        size_t jj = 0;
+                        for (; jj + kGemmNrF64 <= nc; jj += kGemmNrF64) {
+                            gemm_kernel_f64_1x8(c_row, ap, b_pack, kc, nc, jj, first_k);
+                        }
+                        for (; jj < nc; ++jj) {
+                            double sum = first_k ? 0.0 : c_row[jj];
+                            for (size_t k = 0; k < kc; ++k) {
+                                sum += ap[k] * b_pack[k * nc + jj];
+                            }
+                            c_row[jj] = sum;
+                        }
+                    }
+                } else {
+                    for (size_t i = 0; i < mc; ++i) {
+                        T* c_row = c + (i0 + i) * N + j0;
+                        const T* ap = a_pack + i * kc;
+                        for (size_t j = 0; j < nc; ++j) {
+                            T sum = first_k ? T{} : c_row[j];
+                            for (size_t k = 0; k < kc; ++k) {
+                                sum += ap[k] * b_pack[k * nc + j];
+                            }
+                            c_row[j] = sum;
+                        }
+                    }
+                }
+#else
+                for (size_t i = 0; i < mc; ++i) {
+                    T* c_row = c + (i0 + i) * N + j0;
+                    const T* ap = a_pack + i * kc;
+                    for (size_t j = 0; j < nc; ++j) {
+                        T sum = first_k ? T{} : c_row[j];
+                        for (size_t k = 0; k < kc; ++k) {
+                            sum += ap[k] * b_pack[k * nc + j];
+                        }
+                        c_row[j] = sum;
+                    }
+                }
+#endif
+            }
+        }
+    }
+}
+
+} // namespace
+
 /**
 * Compute the matrix multiplication of two matrices (dense row-major batched)
 * Uses AVX2 SIMD if available otherwise naive element wise loop
@@ -640,127 +1115,21 @@ void Array<T>::_fast_matmul(Array& out, const Array& lhs, const Array& rhs) {
         _fast_matmul_scalar(out, lhs, rhs);
         return;
     }
-    const MatmulSpec spec = resolve_matmul(lhs.shape(), rhs.shape()); // create the spec for the matmul (May throw if invalid shapes)
+    const MatmulSpec spec = resolve_matmul(lhs.shape(), rhs.shape());
     if (out.shape() != spec.out_shape) {
         throw std::runtime_error("matmul: incompatible output shape");
     }
-    // get the dimensions of the matrices
-    const size_t M = spec.M; // num rows in the lhs
-    const size_t K = spec.K; // num cols in the lhs and num rows in the rhs
-    const size_t N = spec.N; // num cols in the rhs
-    const Shape row_shape(std::vector<size_t>{M, K}); // lhs matrix shape (M, K)
+    const size_t M = spec.M;
+    const size_t K = spec.K;
+    const size_t N = spec.N;
 
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {  // float32
-        std::vector<float> b_cols(K * N); 
-        const bool pack_once = (spec.b_stride == 0); // check if theres a batch dim
-        if (pack_once) { // batch dim exists and isnt 1 so broadast is not required
-            const float* b0 = rhs.data();
-            for (size_t j = 0; j < N; ++j) {
-                float* col = b_cols.data() + j * K;
-                for (size_t k = 0; k < K; ++k) {
-                    col[k] = b0[k * N + j];
-                }
-            }
-        } 
-        
-        // build the mem layout over the batch dims (takes the arrays inner data and copies into float* arrays)
-        for (size_t bi = 0; bi < spec.batch; ++bi) {
-            const float* a = lhs.data() + bi * spec.a_stride;
-            const float* b = rhs.data() + bi * spec.b_stride;
-            float* c = out.data() + bi * spec.c_stride;
-            if (!pack_once) { // rhs has no batch dim so we need to broadcast here
-                for (size_t j = 0; j < N; ++j) {
-                    float* col = b_cols.data() + j * K;
-                    for (size_t k = 0; k < K; ++k) {
-                        col[k] = b[k * N + j];
-                    }
-                }
-            }
-            // pack the lhs into row wise tiles for cache locality
-            auto a_rows = Tile<float>::tiles(const_cast<float*>(a), row_shape);
-            for (size_t i = 0; i < M; ++i) {  // row
-                const float* a_row = a_rows[i].data;
-                for (size_t j = 0; j < N; ++j) { // column
-                    const float* b_col = b_cols.data() + j * K;
-                    __m256 acc = _mm256_setzero_ps(); // initialize accumulator to zero (float32)
-                    size_t k = 0;
-                    for (; k + 8 <= K; k += 8) { // itter over 8 elements at a time
-                        __m256 av = _mm256_loadu_ps(a_row + k); // load 8 elements from a_row
-                        __m256 bvec = _mm256_loadu_ps(b_col + k); // load 8 elements from packed B col
-                        acc = _mm256_fmadd_ps(av, bvec, acc); // acc += a * b
-                    }
-                    // horizontal sum of 8 lanes
-                    __m128 lo = _mm256_castps256_ps128(acc);
-                    __m128 hi = _mm256_extractf128_ps(acc, 1);
-                    __m128 s = _mm_add_ps(lo, hi);
-                    s = _mm_add_ps(s, _mm_movehdup_ps(s));
-                    s = _mm_add_ss(s, _mm_movehl_ps(s, s));
-                    float sum = _mm_cvtss_f32(s);
-                    for (; k < K; ++k) {
-                        sum += a_row[k] * b_col[k];
-                    }
-                    c[i * N + j] = sum;
-                }
-            }
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        std::vector<double> b_cols(K * N);
-        const bool pack_once = (spec.b_stride == 0);
-        if (pack_once) {
-            const double* b0 = rhs.data();
-            for (size_t j = 0; j < N; ++j) {
-                double* col = b_cols.data() + j * K;
-                for (size_t k = 0; k < K; ++k) {
-                    col[k] = b0[k * N + j];
-                }
-            }
-        }
-        for (size_t bi = 0; bi < spec.batch; ++bi) {
-            const double* a = lhs.data() + bi * spec.a_stride;
-            const double* b = rhs.data() + bi * spec.b_stride;
-            double* c = out.data() + bi * spec.c_stride;
-            if (!pack_once) {
-                for (size_t j = 0; j < N; ++j) {
-                    double* col = b_cols.data() + j * K;
-                    for (size_t k = 0; k < K; ++k) {
-                        col[k] = b[k * N + j];
-                    }
-                }
-            }
-            auto a_rows = Tile<double>::tiles(const_cast<double*>(a), row_shape);
-            for (size_t i = 0; i < M; ++i) {  // row
-                const double* a_row = a_rows[i].data;
-                for (size_t j = 0; j < N; ++j) { // column
-                    const double* b_col = b_cols.data() + j * K;
-                    __m256d acc = _mm256_setzero_pd(); // initialize accumulator to zero (float64)
-                    size_t k = 0;
-                    for (; k + 4 <= K; k += 4) { // itter over 4 elements at a time
-                        __m256d av = _mm256_loadu_pd(a_row + k); // load 4 elements from a_row
-                        __m256d bvec = _mm256_loadu_pd(b_col + k); // load 4 elements from packed B col
-                        acc = _mm256_fmadd_pd(av, bvec, acc); // acc += a * b
-                    }
-                    // horizontal sum of 4 lanes
-                    __m128d lo = _mm256_castpd256_pd128(acc);
-                    __m128d hi = _mm256_extractf128_pd(acc, 1);
-                    __m128d s = _mm_add_pd(lo, hi);
-                    s = _mm_add_sd(s, _mm_unpackhi_pd(s, s));
-                    double sum = _mm_cvtsd_f64(s);
-                    for (; k < K; ++k) {
-                        sum += a_row[k] * b_col[k];
-                    }
-                    c[i * N + j] = sum;
-                }
-            }
-        }
-    } else {
-        // fallback: unsupported T under AVX2 build
-        _fast_matmul_scalar(out, lhs, rhs);
+    // out written by first_k (beta=0) then accumulated; no zero-fill required.
+    for (size_t bi = 0; bi < spec.batch; ++bi) {
+        const T* a = lhs.data() + bi * spec.a_stride;
+        const T* b = rhs.data() + bi * spec.b_stride;
+        T* c = out.data() + bi * spec.c_stride;
+        gemm_tiled_contiguous(c, a, b, M, K, N);
     }
-#else
-    // fallback: no AVX2
-    _fast_matmul_scalar(out, lhs, rhs);
-#endif
 }
 
 /**
@@ -777,6 +1146,300 @@ void Array<T>::_fast_matmul(Array& out, const Array& lhs, const Array& rhs) {
 * #### throws
 * - std::runtime_error: if the shapes are invalid
 */
+namespace {
+
+// Contiguous ewise: out[i] = a[i] ⊕ b[i] (out may alias a for inplace).
+template<typename T>
+void ewise_add_contig(T* out, const T* a, const T* b, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_add_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] + b[i];
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_add_pd(_mm256_loadu_pd(a + i), _mm256_loadu_pd(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] + b[i];
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] + b[i];
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] + b[i];
+    }
+#endif
+}
+
+template<typename T>
+void ewise_sub_contig(T* out, const T* a, const T* b, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_sub_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] - b[i];
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_sub_pd(_mm256_loadu_pd(a + i), _mm256_loadu_pd(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] - b[i];
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] - b[i];
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] - b[i];
+    }
+#endif
+}
+
+template<typename T>
+void ewise_mul_contig(T* out, const T* a, const T* b, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_mul_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] * b[i];
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_mul_pd(_mm256_loadu_pd(a + i), _mm256_loadu_pd(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] * b[i];
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] * b[i];
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] * b[i];
+    }
+#endif
+}
+
+template<typename T>
+void ewise_div_contig(T* out, const T* a, const T* b, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_div_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] / b[i];
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_div_pd(_mm256_loadu_pd(a + i), _mm256_loadu_pd(b + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] / b[i];
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] / b[i];
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] / b[i];
+    }
+#endif
+}
+
+template<typename T>
+void ewise_neg_contig(T* out, const T* a, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        const __m256 z = _mm256_setzero_ps();
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_sub_ps(z, _mm256_loadu_ps(a + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = -a[i];
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        const __m256d z = _mm256_setzero_pd();
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_sub_pd(z, _mm256_loadu_pd(a + i)));
+        }
+        for (; i < n; ++i) {
+            out[i] = -a[i];
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = -a[i];
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = -a[i];
+    }
+#endif
+}
+
+template<typename T>
+void ewise_add_scalar_contig(T* out, const T* a, T value, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        const __m256 vb = _mm256_set1_ps(value);
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_add_ps(_mm256_loadu_ps(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] + value;
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        const __m256d vb = _mm256_set1_pd(value);
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_add_pd(_mm256_loadu_pd(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] + value;
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] + value;
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] + value;
+    }
+#endif
+}
+
+template<typename T>
+void ewise_sub_scalar_contig(T* out, const T* a, T value, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        const __m256 vb = _mm256_set1_ps(value);
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_sub_ps(_mm256_loadu_ps(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] - value;
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        const __m256d vb = _mm256_set1_pd(value);
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_sub_pd(_mm256_loadu_pd(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] - value;
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] - value;
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] - value;
+    }
+#endif
+}
+
+template<typename T>
+void ewise_mul_scalar_contig(T* out, const T* a, T value, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        const __m256 vb = _mm256_set1_ps(value);
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_mul_ps(_mm256_loadu_ps(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] * value;
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        const __m256d vb = _mm256_set1_pd(value);
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_mul_pd(_mm256_loadu_pd(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] * value;
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] * value;
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] * value;
+    }
+#endif
+}
+
+template<typename T>
+void ewise_div_scalar_contig(T* out, const T* a, T value, size_t n) {
+#ifdef __AVX2__
+    if constexpr (std::is_same_v<T, float>) {
+        const __m256 vb = _mm256_set1_ps(value);
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) {
+            _mm256_storeu_ps(out + i, _mm256_div_ps(_mm256_loadu_ps(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] / value;
+        }
+    } else if constexpr (std::is_same_v<T, double>) {
+        const __m256d vb = _mm256_set1_pd(value);
+        size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            _mm256_storeu_pd(out + i, _mm256_div_pd(_mm256_loadu_pd(a + i), vb));
+        }
+        for (; i < n; ++i) {
+            out[i] = a[i] / value;
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = a[i] / value;
+        }
+    }
+#else
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = a[i] / value;
+    }
+#endif
+}
+
+} // namespace
+
 template<typename T>
 void Array<T>::_fast_add(Array& lhs, const Array& rhs) {
     if (rhs.shape().numel() == 1 && lhs.shape().numel() != 1) { // if the rhs is a scalar, add it to the lhs
@@ -796,41 +1459,8 @@ void Array<T>::_fast_add(Array& lhs, const Array& rhs) {
         }
         return;
     }
-    T* a = lhs.data(); // lhs data pointer
-    const T* b = rhs.data(); // rhs data pointer
-    const size_t n = lhs.shape().numel(); // number of elements in the arrays
-
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) { // float32
-        size_t i = 0; // index
-        for (; i + 8 <= n; i += 8) { // itter over 8 elements at a time
-            __m256 va = _mm256_loadu_ps(a + i); // load 8 elements from a
-            __m256 vb = _mm256_loadu_ps(b + i); // load 8 elements from b
-            _mm256_storeu_ps(a + i, _mm256_add_ps(va, vb)); // add and store 8 elements back to a
-        }
-        for (; i < n; ++i) { // itter over the remaining elements
-            a[i] += b[i]; // add the elements
-        }
-    } else if constexpr (std::is_same_v<T, double>) { // float64
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            __m256d vb = _mm256_loadu_pd(b + i);
-            _mm256_storeu_pd(a + i, _mm256_add_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] += b[i];
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] += b[i];
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) { // fallback: no AVX2 simple element wise loop
-        a[i] += b[i];
-    }
-#endif
+    T* a = lhs.data();
+    ewise_add_contig(a, a, rhs.data(), lhs.shape().numel());
 }
 
 template<typename T>
@@ -853,40 +1483,7 @@ void Array<T>::_fast_sub(Array& lhs, const Array& rhs) {
         return;
     }
     T* a = lhs.data();
-    const T* b = rhs.data();
-    const size_t n = lhs.shape().numel();
-
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            __m256 vb = _mm256_loadu_ps(b + i);
-            _mm256_storeu_ps(a + i, _mm256_sub_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] -= b[i];
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            __m256d vb = _mm256_loadu_pd(b + i);
-            _mm256_storeu_pd(a + i, _mm256_sub_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] -= b[i];
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] -= b[i];
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] -= b[i];
-    }
-#endif
+    ewise_sub_contig(a, a, rhs.data(), lhs.shape().numel());
 }
 
 template<typename T>
@@ -909,40 +1506,7 @@ void Array<T>::_fast_mul(Array& lhs, const Array& rhs) {
         return;
     }
     T* a = lhs.data();
-    const T* b = rhs.data();
-    const size_t n = lhs.shape().numel();
-
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            __m256 vb = _mm256_loadu_ps(b + i);
-            _mm256_storeu_ps(a + i, _mm256_mul_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] *= b[i];
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            __m256d vb = _mm256_loadu_pd(b + i);
-            _mm256_storeu_pd(a + i, _mm256_mul_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] *= b[i];
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] *= b[i];
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] *= b[i];
-    }
-#endif
+    ewise_mul_contig(a, a, rhs.data(), lhs.shape().numel());
 }
 
 template<typename T>
@@ -965,40 +1529,7 @@ void Array<T>::_fast_div(Array& lhs, const Array& rhs) {
         return;
     }
     T* a = lhs.data();
-    const T* b = rhs.data();
-    const size_t n = lhs.shape().numel();
-
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            __m256 vb = _mm256_loadu_ps(b + i);
-            _mm256_storeu_ps(a + i, _mm256_div_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] /= b[i];
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            __m256d vb = _mm256_loadu_pd(b + i);
-            _mm256_storeu_pd(a + i, _mm256_div_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] /= b[i];
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] /= b[i];
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] /= b[i];
-    }
-#endif
+    ewise_div_contig(a, a, rhs.data(), lhs.shape().numel());
 }
 
 template<typename T>
@@ -1014,39 +1545,7 @@ void Array<T>::_fast_neg(Array& lhs) {
         return;
     }
     T* a = lhs.data();
-    const size_t n = lhs.shape().numel();
-
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        const __m256 z = _mm256_setzero_ps();
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            _mm256_storeu_ps(a + i, _mm256_sub_ps(z, va));
-        }
-        for (; i < n; ++i) {
-            a[i] = -a[i];
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        const __m256d z = _mm256_setzero_pd();
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            _mm256_storeu_pd(a + i, _mm256_sub_pd(z, va));
-        }
-        for (; i < n; ++i) {
-            a[i] = -a[i];
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] = -a[i];
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] = -a[i];
-    }
-#endif
+    ewise_neg_contig(a, a, lhs.shape().numel());
 }
 
 template<typename T>
@@ -1061,38 +1560,7 @@ void Array<T>::_fast_add(Array& lhs, T value) {
         return;
     }
     T* a = lhs.data();
-    const size_t n = lhs.shape().numel();
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        const __m256 vb = _mm256_set1_ps(value);
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            _mm256_storeu_ps(a + i, _mm256_add_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] += value;
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        const __m256d vb = _mm256_set1_pd(value);
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            _mm256_storeu_pd(a + i, _mm256_add_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] += value;
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] += value;
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] += value;
-    }
-#endif
+    ewise_add_scalar_contig(a, a, value, lhs.shape().numel());
 }
 
 template<typename T>
@@ -1107,38 +1575,7 @@ void Array<T>::_fast_sub(Array& lhs, T value) {
         return;
     }
     T* a = lhs.data();
-    const size_t n = lhs.shape().numel();
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        const __m256 vb = _mm256_set1_ps(value);
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            _mm256_storeu_ps(a + i, _mm256_sub_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] -= value;
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        const __m256d vb = _mm256_set1_pd(value);
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            _mm256_storeu_pd(a + i, _mm256_sub_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] -= value;
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] -= value;
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] -= value;
-    }
-#endif
+    ewise_sub_scalar_contig(a, a, value, lhs.shape().numel());
 }
 
 template<typename T>
@@ -1153,38 +1590,7 @@ void Array<T>::_fast_mul(Array& lhs, T value) {
         return;
     }
     T* a = lhs.data();
-    const size_t n = lhs.shape().numel();
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        const __m256 vb = _mm256_set1_ps(value);
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            _mm256_storeu_ps(a + i, _mm256_mul_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] *= value;
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        const __m256d vb = _mm256_set1_pd(value);
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            _mm256_storeu_pd(a + i, _mm256_mul_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] *= value;
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] *= value;
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] *= value;
-    }
-#endif
+    ewise_mul_scalar_contig(a, a, value, lhs.shape().numel());
 }
 
 template<typename T>
@@ -1199,38 +1605,7 @@ void Array<T>::_fast_div(Array& lhs, T value) {
         return;
     }
     T* a = lhs.data();
-    const size_t n = lhs.shape().numel();
-#ifdef __AVX2__
-    if constexpr (std::is_same_v<T, float>) {
-        const __m256 vb = _mm256_set1_ps(value);
-        size_t i = 0;
-        for (; i + 8 <= n; i += 8) {
-            __m256 va = _mm256_loadu_ps(a + i);
-            _mm256_storeu_ps(a + i, _mm256_div_ps(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] /= value;
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        const __m256d vb = _mm256_set1_pd(value);
-        size_t i = 0;
-        for (; i + 4 <= n; i += 4) {
-            __m256d va = _mm256_loadu_pd(a + i);
-            _mm256_storeu_pd(a + i, _mm256_div_pd(va, vb));
-        }
-        for (; i < n; ++i) {
-            a[i] /= value;
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            a[i] /= value;
-        }
-    }
-#else
-    for (size_t i = 0; i < n; ++i) {
-        a[i] /= value;
-    }
-#endif
+    ewise_div_scalar_contig(a, a, value, lhs.shape().numel());
 }
 
 #pragma endregion fast math operations
@@ -1420,64 +1795,173 @@ void Array<T>::_cross(const Array& other) {
 
 template<typename T>
 Array<T> Array<T>::operator+(const Array& other) const {
-    Array<T> out = this->contiguous();
-    _fast_add(out, other);
+    if (other.shape().numel() == 1 && this->shape().numel() != 1) {
+        return *this + other[0];
+    }
+    if (this->_shape != other.shape()) {
+        throw std::runtime_error("add: shape mismatch");
+    }
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous() && other.is_contiguous()) {
+        ewise_add_contig(out.data(), this->data(), other.data(), n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        const Shape s(idx);
+        out[t] = (*this)[s] + other[s];
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator-(const Array& other) const {
-    Array<T> out = this->contiguous();
-    _fast_sub(out, other);
+    if (other.shape().numel() == 1 && this->shape().numel() != 1) {
+        return *this - other[0];
+    }
+    if (this->_shape != other.shape()) {
+        throw std::runtime_error("sub: shape mismatch");
+    }
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous() && other.is_contiguous()) {
+        ewise_sub_contig(out.data(), this->data(), other.data(), n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        const Shape s(idx);
+        out[t] = (*this)[s] - other[s];
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator*(const Array& other) const {
-    Array<T> out = this->contiguous();
-    _fast_mul(out, other);
+    if (other.shape().numel() == 1 && this->shape().numel() != 1) {
+        return *this * other[0];
+    }
+    if (this->_shape != other.shape()) {
+        throw std::runtime_error("mul: shape mismatch");
+    }
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous() && other.is_contiguous()) {
+        ewise_mul_contig(out.data(), this->data(), other.data(), n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        const Shape s(idx);
+        out[t] = (*this)[s] * other[s];
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator/(const Array& other) const {
-    Array<T> out = this->contiguous();
-    _fast_div(out, other);
+    if (other.shape().numel() == 1 && this->shape().numel() != 1) {
+        return *this / other[0];
+    }
+    if (this->_shape != other.shape()) {
+        throw std::runtime_error("div: shape mismatch");
+    }
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous() && other.is_contiguous()) {
+        ewise_div_contig(out.data(), this->data(), other.data(), n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        const Shape s(idx);
+        out[t] = (*this)[s] / other[s];
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator+(T value) const {
-    Array<T> out = this->contiguous();
-    _fast_add(out, value);
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous()) {
+        ewise_add_scalar_contig(out.data(), this->data(), value, n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        out[t] = (*this)[Shape(idx)] + value;
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator-(T value) const {
-    Array<T> out = this->contiguous();
-    _fast_sub(out, value);
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous()) {
+        ewise_sub_scalar_contig(out.data(), this->data(), value, n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        out[t] = (*this)[Shape(idx)] - value;
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator*(T value) const {
-    Array<T> out = this->contiguous();
-    _fast_mul(out, value);
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous()) {
+        ewise_mul_scalar_contig(out.data(), this->data(), value, n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        out[t] = (*this)[Shape(idx)] * value;
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator/(T value) const {
-    Array<T> out = this->contiguous();
-    _fast_div(out, value);
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous()) {
+        ewise_div_scalar_contig(out.data(), this->data(), value, n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        out[t] = (*this)[Shape(idx)] / value;
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
 template<typename T>
 Array<T> Array<T>::operator-() const {
-    Array<T> out = this->contiguous();
-    _fast_neg(out);
+    Array<T> out(this->_shape);
+    const size_t n = this->_shape.numel();
+    if (this->is_contiguous()) {
+        ewise_neg_contig(out.data(), this->data(), n);
+        return out;
+    }
+    std::vector<size_t> idx(this->ndim(), 0);
+    for (size_t t = 0; t < n; ++t) {
+        out[t] = -(*this)[Shape(idx)];
+        bump_index(idx, this->_shape);
+    }
     return out;
 }
 
@@ -1503,64 +1987,95 @@ void Array<T>::_neg() { _fast_neg(*this); }
 
 template<typename T>
 Array<uint8_t> Array<T>::operator>(T value) const {
-    return compare_walk(*this, [value](T x) { return x > value; });
+    return compare_value(*this, value, CmpOp::Gt);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator<(T value) const {
-    return compare_walk(*this, [value](T x) { return x < value; });
+    return compare_value(*this, value, CmpOp::Lt);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator>=(T value) const {
-    return compare_walk(*this, [value](T x) { return x >= value; });
+    return compare_value(*this, value, CmpOp::Ge);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator<=(T value) const {
-    return compare_walk(*this, [value](T x) { return x <= value; });
+    return compare_value(*this, value, CmpOp::Le);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator==(T value) const {
-    return compare_walk(*this, [value](T x) { return x == value; });
+    return compare_value(*this, value, CmpOp::Eq);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator!=(T value) const {
-    return compare_walk(*this, [value](T x) { return x != value; });
+    return compare_value(*this, value, CmpOp::Ne);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator>(const Array& other) const {
-    return compare_walk(*this, other, [](T x, T y) { return x > y; });
+    return compare_arrays(*this, other, CmpOp::Gt);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator<(const Array& other) const {
-    return compare_walk(*this, other, [](T x, T y) { return x < y; });
+    return compare_arrays(*this, other, CmpOp::Lt);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator>=(const Array& other) const {
-    return compare_walk(*this, other, [](T x, T y) { return x >= y; });
+    return compare_arrays(*this, other, CmpOp::Ge);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator<=(const Array& other) const {
-    return compare_walk(*this, other, [](T x, T y) { return x <= y; });
+    return compare_arrays(*this, other, CmpOp::Le);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator==(const Array& other) const {
-    return compare_walk(*this, other, [](T x, T y) { return x == y; });
+    return compare_arrays(*this, other, CmpOp::Eq);
 }
 template<typename T>
 Array<uint8_t> Array<T>::operator!=(const Array& other) const {
-    return compare_walk(*this, other, [](T x, T y) { return x != y; });
+    return compare_arrays(*this, other, CmpOp::Ne);
 }
 
 template<typename T>
 size_t Array<T>::count_nonzero() const {
     const size_t n = this->_shape.numel();
-    size_t c = 0;
     if (this->_is_contiguous) {
         const T* p = this->data();
+        if constexpr (std::is_same_v<T, uint8_t>) {
+            return count_bytes_nonzero(p, n);
+        }
+#ifdef __AVX2__
+        if constexpr (std::is_same_v<T, float>) {
+            size_t c = 0;
+            size_t i = 0;
+            const __m256 z = _mm256_setzero_ps();
+            for (; i + 8 <= n; i += 8) {
+                const __m256 eq = _mm256_cmp_ps(_mm256_loadu_ps(p + i), z, _CMP_EQ_OQ);
+                c += 8 - popcnt32(static_cast<unsigned>(_mm256_movemask_ps(eq)));
+            }
+            for (; i < n; ++i) {
+                c += (p[i] != 0.0f) ? 1 : 0;
+            }
+            return c;
+        } else if constexpr (std::is_same_v<T, double>) {
+            size_t c = 0;
+            size_t i = 0;
+            const __m256d z = _mm256_setzero_pd();
+            for (; i + 4 <= n; i += 4) {
+                const __m256d eq = _mm256_cmp_pd(_mm256_loadu_pd(p + i), z, _CMP_EQ_OQ);
+                c += 4 - popcnt32(static_cast<unsigned>(_mm256_movemask_pd(eq)));
+            }
+            for (; i < n; ++i) {
+                c += (p[i] != 0.0) ? 1 : 0;
+            }
+            return c;
+        }
+#endif
+        size_t c = 0;
         for (size_t i = 0; i < n; ++i) {
             c += (p[i] != T{}) ? 1 : 0;
         }
         return c;
     }
+    size_t c = 0;
     std::vector<size_t> idx(this->ndim(), 0);
     for (size_t t = 0; t < n; ++t) {
         if ((*this)[Shape(idx)] != T{}) {
@@ -1579,10 +2094,34 @@ Array<T> Array<T>::masked_select(const Array<uint8_t>& mask) const {
     if (count == 0) {
         return out;
     }
-    std::vector<size_t> idx(mask.ndim(), 0);
-    const size_t n = mask.shape().numel();
+    const size_t mnd = mask.ndim();
+    const size_t n_mask = mask.shape().numel();
+    const size_t trail = trailing_product(this->_shape, mnd);
+    if (this->_is_contiguous && mask.is_contiguous()) {
+        const T* src = this->data();
+        const uint8_t* m = mask.data();
+        T* dst = out.data();
+        size_t k = 0;
+        if (trail == 1) {
+            for (size_t i = 0; i < n_mask; ++i) {
+                if (m[i]) {
+                    dst[k++] = src[i];
+                }
+            }
+        } else {
+            const size_t nbytes = trail * sizeof(T);
+            for (size_t i = 0; i < n_mask; ++i) {
+                if (m[i]) {
+                    std::memcpy(dst + k * trail, src + i * trail, nbytes);
+                    ++k;
+                }
+            }
+        }
+        return out;
+    }
+    std::vector<size_t> idx(mnd, 0);
     size_t k = 0;
-    for (size_t t = 0; t < n; ++t) {
+    for (size_t t = 0; t < n_mask; ++t) {
         if (mask[Shape(idx)]) {
             copy_slab(out, k, *this, idx);
             ++k;
@@ -1595,9 +2134,79 @@ Array<T> Array<T>::masked_select(const Array<uint8_t>& mask) const {
 template<typename T>
 void Array<T>::masked_fill(const Array<uint8_t>& mask, T value) {
     check_mask_prefix(this->_shape, mask.shape());
-    std::vector<size_t> idx(mask.ndim(), 0);
-    const size_t n = mask.shape().numel();
-    for (size_t t = 0; t < n; ++t) {
+    const size_t mnd = mask.ndim();
+    const size_t n_mask = mask.shape().numel();
+    const size_t trail = trailing_product(this->_shape, mnd);
+    if (this->_is_contiguous && mask.is_contiguous()) {
+        T* data = this->data();
+        const uint8_t* m = mask.data();
+        if (trail == 1) {
+#ifdef __AVX2__
+            if constexpr (std::is_same_v<T, float>) {
+                const __m256 vb = _mm256_set1_ps(value);
+                const __m256i z = _mm256_setzero_si256();
+                size_t i = 0;
+                for (; i + 8 <= n_mask; i += 8) {
+                    const __m128i m8 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(m + i));
+                    const __m256i m32 = _mm256_cvtepu8_epi32(m8);
+                    const __m256 take = _mm256_castsi256_ps(
+                        _mm256_andnot_si256(_mm256_cmpeq_epi32(m32, z), _mm256_set1_epi32(-1))
+                    );
+                    _mm256_storeu_ps(
+                        data + i,
+                        _mm256_blendv_ps(_mm256_loadu_ps(data + i), vb, take)
+                    );
+                }
+                for (; i < n_mask; ++i) {
+                    if (m[i]) {
+                        data[i] = value;
+                    }
+                }
+                return;
+            } else if constexpr (std::is_same_v<T, double>) {
+                const __m256d vb = _mm256_set1_pd(value);
+                const __m128i z = _mm_setzero_si128();
+                size_t i = 0;
+                for (; i + 4 <= n_mask; i += 4) {
+                    const __m128i m8 = _mm_cvtsi32_si128(
+                        static_cast<int>(m[i]) | (static_cast<int>(m[i + 1]) << 8) |
+                        (static_cast<int>(m[i + 2]) << 16) | (static_cast<int>(m[i + 3]) << 24)
+                    );
+                    const __m128i m32 = _mm_cvtepu8_epi32(m8);
+                    const __m128i nz = _mm_andnot_si128(_mm_cmpeq_epi32(m32, z), _mm_set1_epi32(-1));
+                    const __m256d take = _mm256_castsi256_pd(_mm256_cvtepi32_epi64(nz));
+                    _mm256_storeu_pd(
+                        data + i,
+                        _mm256_blendv_pd(_mm256_loadu_pd(data + i), vb, take)
+                    );
+                }
+                for (; i < n_mask; ++i) {
+                    if (m[i]) {
+                        data[i] = value;
+                    }
+                }
+                return;
+            }
+#endif
+            for (size_t i = 0; i < n_mask; ++i) {
+                if (m[i]) {
+                    data[i] = value;
+                }
+            }
+            return;
+        }
+        for (size_t i = 0; i < n_mask; ++i) {
+            if (m[i]) {
+                T* slab = data + i * trail;
+                for (size_t j = 0; j < trail; ++j) {
+                    slab[j] = value;
+                }
+            }
+        }
+        return;
+    }
+    std::vector<size_t> idx(mnd, 0);
+    for (size_t t = 0; t < n_mask; ++t) {
         if (mask[Shape(idx)]) {
             fill_slab(*this, idx, value);
         }
@@ -1613,10 +2222,34 @@ void Array<T>::masked_scatter(const Array<uint8_t>& mask, const Array& values) {
     if (values.shape() != expect) {
         throw std::runtime_error("mask: scatter values shape must match gathered shape");
     }
-    std::vector<size_t> idx(mask.ndim(), 0);
-    const size_t n = mask.shape().numel();
+    const size_t mnd = mask.ndim();
+    const size_t n_mask = mask.shape().numel();
+    const size_t trail = trailing_product(this->_shape, mnd);
+    if (this->_is_contiguous && mask.is_contiguous() && values.is_contiguous()) {
+        T* dst = this->data();
+        const T* src = values.data();
+        const uint8_t* m = mask.data();
+        size_t k = 0;
+        if (trail == 1) {
+            for (size_t i = 0; i < n_mask; ++i) {
+                if (m[i]) {
+                    dst[i] = src[k++];
+                }
+            }
+        } else {
+            const size_t nbytes = trail * sizeof(T);
+            for (size_t i = 0; i < n_mask; ++i) {
+                if (m[i]) {
+                    std::memcpy(dst + i * trail, src + k * trail, nbytes);
+                    ++k;
+                }
+            }
+        }
+        return;
+    }
+    std::vector<size_t> idx(mnd, 0);
     size_t k = 0;
-    for (size_t t = 0; t < n; ++t) {
+    for (size_t t = 0; t < n_mask; ++t) {
         if (mask[Shape(idx)]) {
             write_slab(*this, idx, values, k);
             ++k;
@@ -1626,12 +2259,81 @@ void Array<T>::masked_scatter(const Array<uint8_t>& mask, const Array& values) {
 }
 
 Array<uint8_t> mask_and(const Array<uint8_t>& a, const Array<uint8_t>& b) {
+#ifdef __AVX2__
+    if (a.shape() == b.shape() && a.is_contiguous() && b.is_contiguous()) {
+        Array<uint8_t> out(a.shape());
+        const size_t n = a.shape().numel();
+        const uint8_t* pa = a.data();
+        const uint8_t* pb = b.data();
+        uint8_t* o = out.data();
+        const __m256i z = _mm256_setzero_si256();
+        const __m256i one = _mm256_set1_epi8(1);
+        size_t i = 0;
+        for (; i + 32 <= n; i += 32) {
+            const __m256i va = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pa + i));
+            const __m256i vb = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pb + i));
+            const __m256i ba = _mm256_andnot_si256(_mm256_cmpeq_epi8(va, z), one);
+            const __m256i bb = _mm256_andnot_si256(_mm256_cmpeq_epi8(vb, z), one);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(o + i), _mm256_and_si256(ba, bb));
+        }
+        for (; i < n; ++i) {
+            o[i] = (pa[i] && pb[i]) ? 1 : 0;
+        }
+        return out;
+    }
+#endif
     return mask_zip(a, b, [](uint8_t x, uint8_t y) { return x && y; });
 }
 Array<uint8_t> mask_or(const Array<uint8_t>& a, const Array<uint8_t>& b) {
+#ifdef __AVX2__
+    if (a.shape() == b.shape() && a.is_contiguous() && b.is_contiguous()) {
+        Array<uint8_t> out(a.shape());
+        const size_t n = a.shape().numel();
+        const uint8_t* pa = a.data();
+        const uint8_t* pb = b.data();
+        uint8_t* o = out.data();
+        const __m256i z = _mm256_setzero_si256();
+        const __m256i one = _mm256_set1_epi8(1);
+        size_t i = 0;
+        for (; i + 32 <= n; i += 32) {
+            const __m256i va = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pa + i));
+            const __m256i vb = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pb + i));
+            const __m256i ba = _mm256_andnot_si256(_mm256_cmpeq_epi8(va, z), one);
+            const __m256i bb = _mm256_andnot_si256(_mm256_cmpeq_epi8(vb, z), one);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(o + i), _mm256_or_si256(ba, bb));
+        }
+        for (; i < n; ++i) {
+            o[i] = (pa[i] || pb[i]) ? 1 : 0;
+        }
+        return out;
+    }
+#endif
     return mask_zip(a, b, [](uint8_t x, uint8_t y) { return x || y; });
 }
 Array<uint8_t> mask_xor(const Array<uint8_t>& a, const Array<uint8_t>& b) {
+#ifdef __AVX2__
+    if (a.shape() == b.shape() && a.is_contiguous() && b.is_contiguous()) {
+        Array<uint8_t> out(a.shape());
+        const size_t n = a.shape().numel();
+        const uint8_t* pa = a.data();
+        const uint8_t* pb = b.data();
+        uint8_t* o = out.data();
+        const __m256i z = _mm256_setzero_si256();
+        const __m256i one = _mm256_set1_epi8(1);
+        size_t i = 0;
+        for (; i + 32 <= n; i += 32) {
+            const __m256i va = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pa + i));
+            const __m256i vb = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pb + i));
+            const __m256i ba = _mm256_andnot_si256(_mm256_cmpeq_epi8(va, z), one);
+            const __m256i bb = _mm256_andnot_si256(_mm256_cmpeq_epi8(vb, z), one);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(o + i), _mm256_xor_si256(ba, bb));
+        }
+        for (; i < n; ++i) {
+            o[i] = (bool(pa[i]) != bool(pb[i])) ? 1 : 0;
+        }
+        return out;
+    }
+#endif
     return mask_zip(a, b, [](uint8_t x, uint8_t y) { return bool(x) != bool(y); });
 }
 Array<uint8_t> mask_not(const Array<uint8_t>& a) {
@@ -1640,9 +2342,26 @@ Array<uint8_t> mask_not(const Array<uint8_t>& a) {
     if (a.is_contiguous()) {
         const uint8_t* p = a.data();
         uint8_t* o = out.data();
+#ifdef __AVX2__
+        const __m256i z = _mm256_setzero_si256();
+        const __m256i one = _mm256_set1_epi8(1);
+        size_t i = 0;
+        for (; i + 32 <= n; i += 32) {
+            const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + i));
+            // 1 if zero, else 0
+            _mm256_storeu_si256(
+                reinterpret_cast<__m256i*>(o + i),
+                _mm256_and_si256(_mm256_cmpeq_epi8(v, z), one)
+            );
+        }
+        for (; i < n; ++i) {
+            o[i] = p[i] ? 0 : 1;
+        }
+#else
         for (size_t i = 0; i < n; ++i) {
             o[i] = p[i] ? 0 : 1;
         }
+#endif
         return out;
     }
     std::vector<size_t> idx(a.ndim(), 0);
