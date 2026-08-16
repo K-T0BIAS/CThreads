@@ -42,6 +42,7 @@ src/cthreads/cpp/src/
 *.obj
 
 #temp ignores
-docs/
 demo/
+demos/
+api/
 *.csv
