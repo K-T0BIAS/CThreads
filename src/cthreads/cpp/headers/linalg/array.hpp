@@ -183,7 +183,7 @@ namespace cthreads::linalg {
 
             Array operator-() const; // negation of an array-> interal fallback on _fast_neg
 
-            Array matmul(const Array& other) const; // matrix multiplication between two arrays-> interal fallback on _fast_matmul (if avx2 available this uses cpu vectorization SIMD)
+            Array matmul(const Array& other, bool parallel = false) const; // matrix multiplication; parallel=true panel-threads large GEMMs
             Array matmul_scalar(const Array& other) const; // elementwise/naive GEMM (bench baseline) (should not be used for the py side bindings, use matmul instead)
             Array dot(const Array& other) const;
             Array dot_scalar(const Array& other) const;    // elementwise/naive dot (bench baseline)
@@ -225,7 +225,7 @@ namespace cthreads::linalg {
             static T _fast_inner_product(const Array& lhs, const Array& rhs);
             static T _fast_inner_product_scalar(const Array& lhs, const Array& rhs);
             static void _fast_cross_product(Array& lhs, const Array& rhs);
-            static void _fast_matmul(Array& out, const Array& lhs, const Array& rhs);
+            static void _fast_matmul(Array& out, const Array& lhs, const Array& rhs, bool parallel = false);
             static void _fast_matmul_scalar(Array& out, const Array& lhs, const Array& rhs);
 
             static void _fast_add(Array& lhs, const Array& rhs);

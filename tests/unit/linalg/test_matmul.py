@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from unit.linalg.helpers import ARRAY_PARAMS, assert_close, cast, filled, matmul_2d
+from unit.linalg.helpers import ARRAY_PARAMS, assert_close, cast, filled, is_int, matmul_2d
 
 
 @pytest.mark.parametrize("Array", ARRAY_PARAMS)
@@ -146,3 +146,29 @@ def test_matmul_does_not_mutate_inputs(Array):
     _ = a.matmul(b)
     assert_close(a, da, Array)
     assert_close(b, db, Array)
+
+
+@pytest.mark.parametrize("Array", ARRAY_PARAMS)
+def test_matmul_parallel_matches_serial(Array):
+    # M*N*K >= parallel threshold (~64e6); N wide enough for multiple Nc panels.
+    # Skip i32: large filled products overflow int32 (serial and parallel agree, but
+    # not with the Python reference).
+    if is_int(Array):
+        pytest.skip("i32 overflow on large GEMM fill")
+    m, k, n = 256, 256, 1024
+    a, da = filled(Array, [m, k], start=1)
+    b, db = filled(Array, [k, n], start=2)
+    c_serial = a.matmul(b)
+    c_par = a.matmul(b, parallel=True)
+    assert c_par.shape == [m, n]
+    assert_close(c_par, c_serial, Array)
+    assert_close(c_par, matmul_2d(da, db), Array)
+
+
+@pytest.mark.parametrize("Array", ARRAY_PARAMS)
+def test_matmul_parallel_below_threshold_ok(Array):
+    # Still correct when parallel=True but MNK is too small to spawn workers.
+    a, da = filled(Array, [8, 8], start=1)
+    b, db = filled(Array, [8, 8], start=2)
+    c = a.matmul(b, parallel=True)
+    assert_close(c, matmul_2d(da, db), Array)

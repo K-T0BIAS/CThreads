@@ -8,6 +8,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -804,6 +805,9 @@ namespace {
 constexpr size_t kGemmMc = 64;
 constexpr size_t kGemmNc = 256;
 constexpr size_t kGemmKc = 256;
+// Parallel panel GEMM only when M*N*K is large enough that spawn cost pays off.
+constexpr uint64_t kGemmParallelMnk = 64ull << 20; // ~67e6 mul-adds
+constexpr double kGemmParallelCoreFrac = 0.8;      // leave ~20% for OS / main / pool
 constexpr size_t kGemmMr = 4;
 
 #ifdef __AVX2__
@@ -955,10 +959,19 @@ void gemm_kernel_f64_1x8(
 }
 #endif
 
-// Contiguous row-major GEMM: C(MxN) += A(MxK) @ B(KxN).
-// Panel pack + 4x16/4x8 microkernel; thread_local Mc×Kc / Kc×Nc scratch (lower peak RAM than A-once).
+// Contiguous row-major GEMM over C columns [j0_begin, j0_end).
+// Panel pack + 4x16/4x8 microkernel; thread_local Mc×Kc / Kc×Nc scratch.
 template<typename T>
-void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, size_t N) {
+void gemm_tiled_j_range(
+    T* c,
+    const T* a,
+    const T* b,
+    size_t M,
+    size_t K,
+    size_t N,
+    size_t j0_begin,
+    size_t j0_end
+) {
     thread_local std::vector<T> a_pack_tl;
     thread_local std::vector<T> b_pack_tl;
     a_pack_tl.resize(kGemmMc * kGemmKc);
@@ -966,8 +979,8 @@ void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, siz
     T* a_pack = a_pack_tl.data();
     T* b_pack = b_pack_tl.data();
 
-    for (size_t j0 = 0; j0 < N; j0 += kGemmNc) {
-        const size_t nc = std::min(kGemmNc, N - j0);
+    for (size_t j0 = j0_begin; j0 < j0_end; j0 += kGemmNc) {
+        const size_t nc = std::min(kGemmNc, j0_end - j0);
         for (size_t k0 = 0; k0 < K; k0 += kGemmKc) {
             const size_t kc = std::min(kGemmKc, K - k0);
             const bool first_k = (k0 == 0);
@@ -1090,6 +1103,53 @@ void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, siz
     }
 }
 
+template<typename T>
+void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, size_t N, bool parallel) {
+    if (!parallel) {
+        gemm_tiled_j_range(c, a, b, M, K, N, 0, N);
+        return;
+    }
+    const uint64_t mnk = static_cast<uint64_t>(M) * static_cast<uint64_t>(N) * static_cast<uint64_t>(K);
+    if (mnk < kGemmParallelMnk) {
+        gemm_tiled_j_range(c, a, b, M, K, N, 0, N);
+        return;
+    }
+    unsigned hw = std::thread::hardware_concurrency();
+    if (hw == 0) {
+        hw = 4;
+    }
+    size_t workers = static_cast<size_t>(hw * kGemmParallelCoreFrac);
+    if (workers < 1) {
+        workers = 1;
+    }
+    const size_t n_panels = (N + kGemmNc - 1) / kGemmNc;
+    if (workers > n_panels) {
+        workers = n_panels;
+    }
+    if (workers <= 1) {
+        gemm_tiled_j_range(c, a, b, M, K, N, 0, N);
+        return;
+    }
+
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    for (size_t tid = 0; tid < workers; ++tid) {
+        const size_t p0 = (n_panels * tid) / workers;
+        const size_t p1 = (n_panels * (tid + 1)) / workers;
+        if (p0 >= p1) {
+            continue;
+        }
+        const size_t j0_begin = p0 * kGemmNc;
+        const size_t j0_end = std::min(N, p1 * kGemmNc);
+        threads.emplace_back([=]() {
+            gemm_tiled_j_range(c, a, b, M, K, N, j0_begin, j0_end);
+        });
+    }
+    for (std::thread& th : threads) {
+        th.join();
+    }
+}
+
 } // namespace
 
 /**
@@ -1101,6 +1161,7 @@ void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, siz
 * - out: output array
 * - lhs: left hand side matrix
 * - rhs: right hand side matrix
+* - parallel: if true, panel-parallel GEMM when M*N*K is above threshold
 *
 * #### returns
 * - void
@@ -1109,7 +1170,7 @@ void gemm_tiled_contiguous(T* c, const T* a, const T* b, size_t M, size_t K, siz
 * - std::runtime_error: if the shapes are invalid
 */
 template<typename T>
-void Array<T>::_fast_matmul(Array& out, const Array& lhs, const Array& rhs) {
+void Array<T>::_fast_matmul(Array& out, const Array& lhs, const Array& rhs, bool parallel) {
     // Dense row-major batched: lhs (..., M, K) @ rhs (..., K, N) -> out (..., M, N)
     if (!(lhs.is_contiguous() && rhs.is_contiguous() && out.is_contiguous())) {
         _fast_matmul_scalar(out, lhs, rhs);
@@ -1128,7 +1189,7 @@ void Array<T>::_fast_matmul(Array& out, const Array& lhs, const Array& rhs) {
         const T* a = lhs.data() + bi * spec.a_stride;
         const T* b = rhs.data() + bi * spec.b_stride;
         T* c = out.data() + bi * spec.c_stride;
-        gemm_tiled_contiguous(c, a, b, M, K, N);
+        gemm_tiled_contiguous(c, a, b, M, K, N, parallel);
     }
 }
 
@@ -1613,10 +1674,10 @@ void Array<T>::_fast_div(Array& lhs, T value) {
 #pragma region public math API
 
 template<typename T>
-Array<T> Array<T>::matmul(const Array& other) const {
+Array<T> Array<T>::matmul(const Array& other, bool parallel) const {
     const MatmulSpec spec = resolve_matmul(this->_shape, other._shape);
     Array<T> out(spec.out_shape);
-    _fast_matmul(out, *this, other);
+    _fast_matmul(out, *this, other, parallel);
     return out;
 }
 

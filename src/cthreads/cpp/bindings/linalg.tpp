@@ -330,7 +330,7 @@ inline void bind_array(py::module_& m, const char* name) {
             .def("__ror__", &cthreads::linalg::mask_or)
             .def("__rxor__", &cthreads::linalg::mask_xor);
     } else {
-        cls.def("matmul", &Arr::matmul)
+        cls.def("matmul", &Arr::matmul, py::arg("other"), py::arg("parallel") = false)
             .def("dot", &Arr::dot)
             .def("cross", &Arr::cross)
             .def(py::self + py::self)
