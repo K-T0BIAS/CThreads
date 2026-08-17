@@ -69,12 +69,40 @@ def test_compile_threadable_emits_struct_and_c_wrapper(tmp_module):
     hpp = (root / "__Threadable__" / "Particle.hpp").read_text(encoding="utf-8")
     cpp = (root / "__Threadable__" / "Particle.cpp").read_text(encoding="utf-8")
     assert "struct Particle {" in hpp
-    assert "double x;" in hpp
+    assert "double x{};" in hpp
+    assert "Particle() = default;" in hpp
     assert "void step(double dt);" in hpp
     assert "Particle_step" in hpp
     assert "this->x" in cpp
     assert "self->step(" in cpp
     assert "Particle_step" in KERNELS
+
+
+def test_compile_free_thread_calls_threadable_method(tmp_module):
+    mod = tmp_module(
+        """
+        from cthreads import Threadable, Thread
+
+        @Threadable
+        class Particle:
+            x: float
+
+            @Thread
+            def step(self, dt: float) -> None:
+                self.x += dt
+
+        @Thread
+        def run(ps: list[Particle], n: int, dt: float) -> None:
+            for i in range(n):
+                ps[i].step(dt)
+        """
+    )
+    info = compile(force=True)
+    assert "run" in info["rewritten"]
+    cpp = (Path(mod.__file__).parent / "__Thread__" / "run.cpp").read_text(
+        encoding="utf-8"
+    )
+    assert ".step(dt)" in cpp
 
 
 def test_source_fingerprint_used_in_cache(tmp_module):

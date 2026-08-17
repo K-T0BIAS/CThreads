@@ -71,6 +71,8 @@ class ThreadableUnit(BaseUnit):
 
         for field_name, py_type in self.fields.items():
             decl, _ = py_type.to_cpp(field_name)
+            if decl.endswith(";"):
+                decl = f"{decl[:-1]}{{}};"
             fields.append(f"    {decl}")
             for line in include_for(py_type, self.hpp_path).splitlines(keepends=True):
                 if line and line not in seen_includes:
@@ -91,8 +93,9 @@ class ThreadableUnit(BaseUnit):
         if field_block:
             field_block += "\n"
 
-        method_decls = "\n".join(r.method_decl() for r in results)
-        if method_decls:
+        method_decls = f"    {name}() = default;\n"
+        method_decls += "\n".join(r.method_decl() for r in results)
+        if results:
             method_decls += "\n"
 
         c_wrappers_decl: list[str] = []

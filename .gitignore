@@ -5,6 +5,7 @@ testing/
 __Threadable__/
 __Thread__/
 *.dll
+*lib
 build/
 cmake-build-*/
 _skbuild/
@@ -46,3 +47,13 @@ demo/
 demos/
 api/
 *.csv
+
+# >>> cthreads (auto)
+__Thread__/
+__Threadable__/
+.cthreads_cache.json
+cthreads_kernels.dll
+cthreads_kernels.so
+libcthreads_kernels.so
+libcthreads_kernels.dylib
+# <<< cthreads (auto)

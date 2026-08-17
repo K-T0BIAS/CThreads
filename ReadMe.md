@@ -11,8 +11,8 @@ Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist c
 
 ### Docs
 
-- [Install](./docs/install.md) *(see [Install](#install) below)*
-- [In-depth guide](./docs/index.md) *(stub)*
+- [Install](./docs/install.md)
+- [Guides](./docs/index.md)
 - [Math & linalg](./docs/guide/math_and_linalg.md)
 - [Compiler notes](./docs/COMPILER.md)
 - [Sync / state writeback](./docs/sync_state_docs.md)
@@ -22,13 +22,13 @@ Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist c
 
 # Install
 
-Requires **Python ≥ 3.10**, a C++17 toolchain, and CMake (native extension via scikit-build / pybind11).
+**Python ≥ 3.10**, a **C++17** compiler, and **CMake ≥ 3.18**. Full toolchain notes (MSVC / gcc / clang, venv CMake): [docs/install.md](./docs/install.md).
 
 ```bash
-pip install -e .
-# optional: tests
-pip install -e ".[test]"
-pytest
+python -m venv .venv
+# activate, then:
+pip install cmake ninja    # CMake/Ninja in the venv; compiler is still system/MSVC
+pip install -e ".[test]"   # or: pip install -e .
 ```
 
 First `cthreads.thread(...)` auto-runs cache-checked `prepare` + `load_kernels`. Call `unload_kernels()` before a force rebuild (`thread(..., force=True)` or `prepare(force=True)`).
@@ -104,7 +104,7 @@ class MyExample:
 ### Rules
 
 1. **All fields are typed** at class scope (dataclass-style annotations).
-2. **Do not define / override `__init__`.** The decorator does not inject a dataclass constructor — construct with `ExampleClass()` and assign fields (or a small Python factory outside `@Thread`).
+2. **Do not define / override `__init__`.** The decorator injects a default constructor (`ExampleClass()` zeros / empties fields, matching C++ `T{}`).
 3. **Kernel methods must use `@Thread`** and take **`self`** like normal methods.
 4. Method argument / return annotations must be allowed types (or `-> None`).
 

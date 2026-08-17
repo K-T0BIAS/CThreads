@@ -61,6 +61,25 @@ def test_math_call_and_const():
         Syntax.expr(parse_expr("unknown(x)"), ctx)
 
 
+def test_threadable_method_call_lowers_to_cpp_member():
+    ctx = make_ctx(
+        owner_name="Particle",
+        symbols={
+            "self": PyThreadable("Particle"),
+            "p": PyThreadable("Particle"),
+            "ps": PyList(PyThreadable("Particle")),
+            "dt": PyFloat(),
+            "i": PyInt(),
+        },
+    )
+    assert Syntax.expr(parse_expr("p.step(dt)"), ctx) == "(p).step(dt)"
+    assert Syntax.expr(parse_expr("self.step(dt)"), ctx) == "this->step(dt)"
+    assert Syntax.expr(parse_expr("ps[i].step(dt)"), ctx) == "((ps[i])).step(dt)"
+    assert Syntax.expr(parse_expr("p.reset()"), ctx) == "(p).reset()"
+    with pytest.raises(TypeError, match="keyword"):
+        Syntax.expr(parse_expr("p.step(dt=1.0)"), ctx)
+
+
 def test_builtin_len_call():
     ctx = make_ctx(symbols={"xs": PyList(PyInt()), "n": PyInt()})
     assert Syntax.expr(parse_expr("len(xs)"), ctx) == "(xs).size()"

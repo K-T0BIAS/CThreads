@@ -65,7 +65,7 @@ One important caveat: during the run, Python-side memory is **not** live-updated
 3. Not all Python types are allowed (C++ needs a fixed layout). Allowed: `int`, `float`, `bool`, `str`, `list[...]`, `dict[...]` of allowed types, nested combinations, `@Threadable` classes, and internal types from `cthreads` (for example sync / linalg arrays). **`set` is not supported** for codegen yet.
 4. Inside `@Thread` bodies, only call other `@Thread` functions/methods, plus supported libraries: `math`, `cthreads.math`, `cthreads.sync`, `cthreads.linalg` (and builtins like `len` / `range` / `__sync_state`). No arbitrary Python.
 5. **Mutations stick only after writeback.** The kernel edits the C++ pack. Returning a value gives you that result on the host. Mutable args (`list`, `dict`, `@Threadable`) are written back on **join / await**. For updates **while** the job still runs, use `__sync_state()` inside the kernel, `job.sync_state()` on the host, or other tools in [`cthreads.sync`](./guide/sync.md). Sync writes back **job args**, not unrelated aliases or parent containers.
-6. `@Threadable` classes must not define a custom `__init__`. Assign fields after `MyClass()`, use a `@Thread` setup method (for example `custom_init`), or prepare data in a Python factory outside the kernel.
+6. `@Threadable` classes must not define a custom `__init__`. `MyClass()` uses the generated default constructor (zero / empty fields). Override values after construction, or use a `@Thread` setup method.
 7. `@Threadable` kernel methods need `@Thread` and a normal `self` parameter.
 8. Keep kernels simple: math, loops, branches, containers, linalg/sync APIs. No dynamic Python magic.
 

@@ -42,6 +42,42 @@ def test_threadable_registers_fields_and_methods():
     assert Particle.step.__threaded is True
 
 
+def test_threadable_default_init_zeros_fields():
+    @Threadable
+    class Vec2:
+        x: float
+        y: float
+
+    @Threadable
+    class Body:
+        pos: Vec2
+        n: int
+        tags: list[str]
+        ok: bool
+        name: str
+
+    v = Vec2()
+    assert v.x == 0.0 and v.y == 0.0
+    b = Body()
+    assert b.n == 0
+    assert b.ok is False
+    assert b.name == ""
+    assert b.tags == []
+    assert isinstance(b.pos, Vec2)
+    assert b.pos.x == 0.0
+
+
+def test_threadable_rejects_user_init():
+    with pytest.raises(TypeError, match="must not define __init__"):
+
+        @Threadable
+        class Bad:
+            x: float
+
+            def __init__(self, x: float):
+                self.x = x
+
+
 def test_threadable_rejects_bad_field():
     class Bad:
         pass

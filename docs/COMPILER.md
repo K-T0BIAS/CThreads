@@ -190,7 +190,7 @@ It does these things, in order:
    REGISTRY.threadables["Particle"] = Particle
    ```
 
-7. Returns the **same** class object (no invented `__init__`).
+7. Injects a default `__init__` (host `Cls()` zeros / empties fields). Compile later emits `Name() = default` and `field{}` on the C++ struct.
 
 So after decoration, these are still normal Python classes. You create instances and set attributes yourself. The decorator’s job is: “remember this class so compile can turn it into a C++ `struct` later.”
 

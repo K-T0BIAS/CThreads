@@ -7,7 +7,7 @@ LICENSE file in the root directory of this source tree.
 import inspect
 from ..Registry import REGISTRY
 from .lib import is_threadable
-from typing import Any, get_type_hints
+from typing import Any, get_origin, get_type_hints
 
 
 def Threadable(cls):
@@ -21,7 +21,8 @@ def Threadable(cls):
     - All methods must have type hints that are @Threadable
     - All methods must return a @Threadable or basic python type (int, float, str, bool)
     - All methods must accept @Threadable or basic python types as arguments
-    - The class must not have an __init__ method
+    - Do not define ``__init__``; the decorator supplies a default constructor
+      (Python field defaults matching C++ ``T{}`` / ``Name() = default``)
 
     #### Example:
 
@@ -33,13 +34,19 @@ def Threadable(cls):
     ...     def add(self, x: float, y: float) -> float:
     ...         return self.x + self.y
     """
+    if "__init__" in cls.__dict__:
+        raise TypeError(
+            f"Threadable class {cls.__name__} must not define __init__; "
+            "the decorator supplies a default constructor"
+        )
+
     cls.__threadable = True
     cls.__threadable_version = REGISTRY.VERSION
 
     # localns includes the class so self-refs (list[Boid] / list["Boid"]) resolve
     # while the decorator is still running.
-    anno_dict: dict[str, Any] = get_type_hints(cls, localns={cls.__name__: cls})
-    for hint in anno_dict.values():
+    field_hints: dict[str, Any] = get_type_hints(cls, localns={cls.__name__: cls})
+    for hint in field_hints.values():
         try:
             is_threadable(hint)
         except TypeError as e:
@@ -49,6 +56,8 @@ def Threadable(cls):
 
     # ensure all methods are @Thread wrapped
     for name, func in inspect.getmembers(cls, predicate=inspect.isfunction):
+        if name == "__init__":
+            continue
         if not getattr(func, "__threaded", False):
             # plain methods: still require threadable-safe annotations if present
             anno_dict = get_type_hints(func)
@@ -72,5 +81,40 @@ def Threadable(cls):
                     f"Threadable method {name} has invalid type {hint}"
                 ) from e
 
-    REGISTRY.register_threadable(cls) # register the class in the REGISTRY
-    return cls # return the class
+    # Host-side default ctor: same idea as C++ ``Name() = default`` with ``field{}``.
+    hints = tuple(field_hints.items())
+
+    def __init__(self) -> None:
+        for field_name, hint in hints:
+            origin = get_origin(hint)
+            if origin is list:
+                setattr(self, field_name, [])
+            elif origin is dict:
+                setattr(self, field_name, {})
+            elif origin is set:
+                setattr(self, field_name, set())
+            elif hint is int:
+                setattr(self, field_name, 0)
+            elif hint is float:
+                setattr(self, field_name, 0.0)
+            elif hint is bool:
+                setattr(self, field_name, False)
+            elif hint is str:
+                setattr(self, field_name, "")
+            elif isinstance(hint, type):
+                try:
+                    setattr(self, field_name, hint())
+                except TypeError as e:
+                    raise TypeError(
+                        f"Threadable class {type(self).__name__}: field {field_name!r} "
+                        f"type {hint!r} has no zero-arg constructor"
+                    ) from e
+            else:
+                raise TypeError(
+                    f"Threadable class {type(self).__name__}: "
+                    f"cannot default-construct field {field_name!r} ({hint!r})"
+                )
+
+    cls.__init__ = __init__
+    REGISTRY.register_threadable(cls)
+    return cls
