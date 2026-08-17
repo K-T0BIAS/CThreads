@@ -96,7 +96,7 @@ result = await job          # preferred (async)
 A `@Threadable` class becomes a C++ `struct`. Fields are class annotations. Methods that run off the GIL are marked `@Thread`.
 
 ### Rules
-- **No user `__init__`** — the decorator supplies a default constructor (`Cls()` zeros / empties fields).
+- **No user `__init__`** — the decorator supplies a dataclass-style constructor (`Cls(1.0, 2.0)` or `Cls(x=1.0)`; omitted fields zero / empty).
 - Field types must be allowed (see §2).
 - `@Thread` methods: first parameter is `self`; other args/return follow `@Thread` rules.
 - Nested `@Threadable` types and `list[SomeThreadable]` are allowed (including self-refs via quotes / postponed evaluation where needed).
@@ -116,9 +116,8 @@ class Particle:
     def step(self, dt: float) -> None:
         self.x += self.velocity * dt
 
-# Python-side instance (default ctor zeros fields)
-p = Particle()
-p.velocity = 1.5
+# Python-side instance (dataclass-style ctor; omitted fields are zeros)
+p = Particle(velocity=1.5)
 
 # Methods: pass the unbound function + instance as `self`
 job = thread(Particle.step, p, 0.016)

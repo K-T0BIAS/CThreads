@@ -9,6 +9,9 @@ from ..Registry import REGISTRY
 from .lib import is_threadable
 from typing import Any, get_origin, get_type_hints
 
+# Signature placeholder for list/dict/set/nested fields (new container each call).
+_FACTORY = type("_FACTORY", (), {"__repr__": lambda self: "<factory>"})()
+
 
 def Threadable(cls):
     """
@@ -21,8 +24,8 @@ def Threadable(cls):
     - All methods must have type hints that are @Threadable
     - All methods must return a @Threadable or basic python type (int, float, str, bool)
     - All methods must accept @Threadable or basic python types as arguments
-    - Do not define ``__init__``; the decorator supplies a default constructor
-      (Python field defaults matching C++ ``T{}`` / ``Name() = default``)
+    - Do not define ``__init__``; the decorator supplies a dataclass-style
+      constructor (positional/keyword fields; omitted fields match C++ ``T{}``)
 
     #### Example:
 
@@ -37,7 +40,7 @@ def Threadable(cls):
     if "__init__" in cls.__dict__:
         raise TypeError(
             f"Threadable class {cls.__name__} must not define __init__; "
-            "the decorator supplies a default constructor"
+            "the decorator supplies a dataclass-style constructor"
         )
 
     cls.__threadable = True
@@ -81,11 +84,36 @@ def Threadable(cls):
                     f"Threadable method {name} has invalid type {hint}"
                 ) from e
 
-    # Host-side default ctor: same idea as C++ ``Name() = default`` with ``field{}``.
+    # Host dataclass-style ctor. Omitted fields match C++ ``T{}`` / ``Name() = default``.
     hints = tuple(field_hints.items())
+    field_names = tuple(name for name, _ in hints)
+    field_set = frozenset(field_names)
+    cls_name = cls.__name__
 
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
+        if len(args) > len(field_names):
+            n = len(field_names)
+            raise TypeError(
+                f"{cls_name}.__init__() takes from 1 to {n + 1} positional "
+                f"arguments but {len(args) + 1} were given"
+            )
+        assigned = {}
+        for i, val in enumerate(args):
+            assigned[field_names[i]] = val
+        for key, val in kwargs.items():
+            if key not in field_set:
+                raise TypeError(
+                    f"{cls_name}.__init__() got an unexpected keyword argument {key!r}"
+                )
+            if key in assigned:
+                raise TypeError(
+                    f"{cls_name}.__init__() got multiple values for argument {key!r}"
+                )
+            assigned[key] = val
         for field_name, hint in hints:
+            if field_name in assigned:
+                setattr(self, field_name, assigned[field_name])
+                continue
             origin = get_origin(hint)
             if origin is list:
                 setattr(self, field_name, [])
@@ -115,6 +143,28 @@ def Threadable(cls):
                     f"cannot default-construct field {field_name!r} ({hint!r})"
                 )
 
+    params = [inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    for field_name, hint in hints:
+        if hint is int:
+            default = 0
+        elif hint is float:
+            default = 0.0
+        elif hint is bool:
+            default = False
+        elif hint is str:
+            default = ""
+        else:
+            default = _FACTORY
+        params.append(
+            inspect.Parameter(
+                field_name,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=default,
+                annotation=hint,
+            )
+        )
+    __init__.__signature__ = inspect.Signature(params)
+    __init__.__qualname__ = f"{cls_name}.__init__"
     cls.__init__ = __init__
     REGISTRY.register_threadable(cls)
     return cls

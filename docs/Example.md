@@ -30,9 +30,7 @@ def move(p: Particle, dt: float) -> None:
     p.y = p.y + dt
 
 # build a Python Particle and run move off the GIL
-p = Particle()
-p.x = 1.0
-p.y = 2.0
+p = Particle(1.0, 2.0)
 
 job = thread(move, p, 0.1)
 job.start()
@@ -74,7 +72,7 @@ It does these things, in order:
 
 5. Returns the **same** class object (no new `__init__` is invented).
 
-So after decoration, `Particle` is still a normal Python class. You create instances with `Particle()` and set attributes yourself (`p.x = 1.0`). The decorator’s job is: “remember this class so compile can turn it into a C++ `struct` later.”
+So after decoration, `Particle` is still a normal Python class. You create instances with the generated dataclass-style constructor (`Particle(1.0, 2.0)`). The decorator’s job is: “remember this class so compile can turn it into a C++ `struct` later.”
 
 ### 1.2 `@Thread` on `move`
 
@@ -743,9 +741,7 @@ From this point on, C++ can look up symbols by name (`move__call`, …), and Pyt
 Assume:
 
 ```python
-p = Particle()
-p.x = 1.0
-p.y = 2.0
+p = Particle(1.0, 2.0)
 job = thread(move, p, 0.1)
 ```
 

@@ -136,14 +136,7 @@ def simulate_step(
 
 
 # ---------- host setup ----------
-p = Particle()
-p.pos = Vec2()
-p.pos.x = 1.0
-p.pos.y = 2.0
-p.velocity = 3.0
-p.tags = ["spawn"]
-p.scores = {"energy": 1.0}
-p.lock = Lock()
+p = Particle(Vec2(1.0, 2.0), 3.0, ["spawn"], {"energy": 1.0}, Lock())
 
 forces = [0.5, 0.25]
 vel_field = ArrayF32(Shape([2]))  # host-built; passed into the kernel
@@ -190,9 +183,9 @@ It does these things, in order:
    REGISTRY.threadables["Particle"] = Particle
    ```
 
-7. Injects a default `__init__` (host `Cls()` zeros / empties fields). Compile later emits `Name() = default` and `field{}` on the C++ struct.
+7. Injects a dataclass-style `__init__` (host `Cls(1.0, 2.0)` / keywords; omitted fields zero / empty). Compile later emits `Name() = default` and `field{}` on the C++ struct.
 
-So after decoration, these are still normal Python classes. You create instances and set attributes yourself. The decorator’s job is: “remember this class so compile can turn it into a C++ `struct` later.”
+So after decoration, these are still normal Python classes. You create instances with the generated constructor. The decorator’s job is: “remember this class so compile can turn it into a C++ `struct` later.”
 
 ### 1.2 `@Thread` on `kick` and `simulate_step`
 

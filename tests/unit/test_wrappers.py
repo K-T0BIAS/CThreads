@@ -1,5 +1,7 @@
 """Unit tests for @Thread / @Threadable wrappers."""
 
+import inspect
+
 import pytest
 
 from cthreads import Thread, Threadable
@@ -65,6 +67,42 @@ def test_threadable_default_init_zeros_fields():
     assert b.tags == []
     assert isinstance(b.pos, Vec2)
     assert b.pos.x == 0.0
+
+
+def test_threadable_dataclass_style_init():
+    @Threadable
+    class Vec2:
+        x: float
+        y: float
+
+    @Threadable
+    class Body:
+        pos: Vec2
+        n: int
+        tags: list[str]
+        ok: bool
+        name: str
+
+    v = Vec2(1.0, 2.0)
+    assert v.x == 1.0 and v.y == 2.0
+    sig = inspect.signature(Vec2)
+    assert list(sig.parameters) == ["x", "y"]
+    v2 = Vec2(x=3.0)
+    assert v2.x == 3.0 and v2.y == 0.0
+    b = Body(Vec2(1.0, 2.0), 4, ["a"], True, "ok")
+    assert b.pos.x == 1.0 and b.pos.y == 2.0
+    assert b.n == 4 and b.ok is True and b.name == "ok" and b.tags == ["a"]
+    b2 = Body(n=9, name="z")
+    assert b2.n == 9 and b2.name == "z" and b2.pos.x == 0.0 and b2.tags == []
+    a_tags = Body().tags
+    b_tags = Body().tags
+    assert a_tags is not b_tags
+    with pytest.raises(TypeError, match="positional"):
+        Vec2(1.0, 2.0, 3.0)
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        Vec2(z=1.0)
+    with pytest.raises(TypeError, match="multiple values"):
+        Vec2(1.0, x=2.0)
 
 
 def test_threadable_rejects_user_init():

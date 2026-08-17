@@ -104,7 +104,7 @@ class MyExample:
 ### Rules
 
 1. **All fields are typed** at class scope (dataclass-style annotations).
-2. **Do not define / override `__init__`.** The decorator injects a default constructor (`ExampleClass()` zeros / empties fields, matching C++ `T{}`).
+2. **Do not define / override `__init__`.** The decorator injects a dataclass-style constructor (`ExampleClass(1, "x")` or `ExampleClass(attr1=1)`; omitted fields zero / empty, matching C++ `T{}`).
 3. **Kernel methods must use `@Thread`** and take **`self`** like normal methods.
 4. Method argument / return annotations must be allowed types (or `-> None`).
 
@@ -126,10 +126,7 @@ class ExampleClass:
         return self.attr2 + string
 
 
-obj = ExampleClass()
-obj.attr1 = 0
-obj.attr2 = "1"
-obj.attr3 = [2.0, 3.0]
+obj = ExampleClass(0, "1", [2.0, 3.0])
 
 obj.method1()
 print(obj.attr1, obj.method2(" 1"))  # 1  1 1
