@@ -18,6 +18,7 @@
 #include "linalg.hpp"
 #include "pool.hpp"
 #include "../headers/pool/threadPool.hpp"
+#include "../headers/shared_host.hpp"
 
 #include <cstdint>
 #include <atomic>
@@ -33,6 +34,13 @@
 namespace py = pybind11;
 
 namespace {
+
+/**
+The default sharedd host is used to store shared memory for threads that are not contained in a pool.
+ie when a thread/job is created using cthreads.thread(...).
+*/
+static std::shared_ptr<cthreads::SharedHost> default_shared_host = std::make_shared<cthreads::SharedHost>();
+
 
 // JobContext TLS lives ONLY in this extension DLL. Kernels call into
 // cthreads_ext_sync_state via sync_bridge (bound at load_kernels).
@@ -107,6 +115,30 @@ struct SpawnedKernel {
     bool done_flag = false;
     std::exception_ptr eptr;
 
+    std::shared_ptr<cthreads::SharedHost> shared_host; // the job's shared host (smem)
+    /** Param names registered on spawn (`register_job`). */
+    std::vector<std::string> shared_param_symbols;
+    /** Param names + shared return slot; freed on job end after Python copy. */
+    std::vector<std::string> shared_cleanup_symbols;
+    bool shared_lifecycle_active = false;
+
+    void unregister_shared_if_needed() {
+        if (!shared_lifecycle_active || !shared_host) {
+            return;
+        }
+        std::vector<std::string> to_drop;
+        to_drop.reserve(shared_cleanup_symbols.size());
+        for (const auto& name : shared_cleanup_symbols) {
+            if (shared_host->contains(name)) {
+                to_drop.push_back(name);
+            }
+        }
+        if (!to_drop.empty()) {
+            shared_host->unregister_job(to_drop);
+        }
+        shared_lifecycle_active = false;
+    }
+
     void mark_done(std::exception_ptr e = nullptr) {
         {
             std::lock_guard<std::mutex> g(done_mu);
@@ -117,7 +149,10 @@ struct SpawnedKernel {
             done_flag = true;
         }
         done_cv.notify_all();
-        // Abandoned / never-ran: free pack (success path frees inside make_kernel_job).
+        // Abandoned / never-ran: release shared registration + free pack.
+        if (!finished) {
+            unregister_shared_if_needed();
+        }
         if (!finished && pack && free_fn) {
             std::lock_guard<std::mutex> g(state_mu);
             if (!finished && pack && free_fn) {
@@ -242,16 +277,20 @@ void writeback_params(
     const py::list& values,
     void* pack,
     py::dict types,
-    py::dict schemas
+    py::dict schemas,
+    void* shared_host = nullptr,
+    py::dict meta = py::dict()
 ) {
     py::module_ marshal = py::module_::import("cthreads.marshal");
-    marshal.attr("writeback_params")(
+    marshal.attr("writeback_job_state")(
         symbol,
         params,
         values,
         reinterpret_cast<std::uintptr_t>(pack),
+        reinterpret_cast<std::uintptr_t>(shared_host),
         types,
-        schemas
+        schemas,
+        meta
     );
 }
 
@@ -271,10 +310,20 @@ void job_do_writeback(cthreads::detail::JobContext* ctx) {
     auto* values = static_cast<py::list*>(ctx->values);
     auto* types = static_cast<py::dict*>(ctx->types);
     auto* schemas = static_cast<py::dict*>(ctx->schemas);
+    auto* meta = static_cast<py::dict*>(ctx->meta);
     if (!symbol || !params || !values || !types || !schemas) {
         return;
     }
-    writeback_params(*symbol, *params, *values, ctx->pack, *types, *schemas);
+    writeback_params(
+        *symbol,
+        *params,
+        *values,
+        ctx->pack,
+        *types,
+        *schemas,
+        ctx->shared_host,
+        meta ? *meta : py::dict()
+    );
 }
 
 /**
@@ -298,7 +347,9 @@ void SpawnedKernel::sync_state() {
         *values_keep,
         pack,
         *types_keep,
-        *schemas_keep
+        *schemas_keep,
+        shared_host.get(),
+        *meta_keep
     );
 }
 
@@ -309,11 +360,84 @@ Args:
 - meta: the compile time metadata from __kernel_meta__
 - pack: the pointer to the pack (struct FnName_args)
 */
-py::object read_return(py::dict meta, void* pack) {
+py::object read_return(py::dict meta, void* pack, void* shared_host = nullptr) {
     py::module_ marshal = py::module_::import("cthreads.marshal");
     return marshal.attr("unpack_return")(
         meta,
-        reinterpret_cast<std::uintptr_t>(pack)
+        reinterpret_cast<std::uintptr_t>(pack),
+        reinterpret_cast<std::uintptr_t>(shared_host)
+    );
+}
+
+std::vector<std::string> shared_symbols_from_params(const py::list& params) {
+    std::vector<std::string> names;
+    for (py::handle item : params) {
+        py::dict p = py::reinterpret_borrow<py::dict>(item);
+        if (p["pass_as"].cast<std::string>() == "shared") {
+            names.push_back(p["name"].cast<std::string>());
+        }
+    }
+    return names;
+}
+
+bool meta_has_shared_return(const py::dict& meta) {
+    if (!meta.contains("return_pass_as")) {
+        return false;
+    }
+    py::handle pass = meta["return_pass_as"];
+    if (pass.is_none()) {
+        return false;
+    }
+    return pass.cast<std::string>() == "shared";
+}
+
+std::vector<std::string> shared_cleanup_symbols_from_meta(
+    const py::list& params,
+    const py::dict& meta
+) {
+    std::vector<std::string> names = shared_symbols_from_params(params);
+    if (!meta_has_shared_return(meta)) {
+        return names;
+    }
+    std::string ret_name = "__return__";
+    if (meta.contains("return_shared_name")) {
+        py::handle rn = meta["return_shared_name"];
+        if (!rn.is_none()) {
+            ret_name = rn.cast<std::string>();
+        }
+    }
+    names.push_back(ret_name);
+    return names;
+}
+
+void attach_shared_host_to_pack(
+    const std::string& symbol,
+    void* pack,
+    cthreads::SharedHost* host
+) {
+    const std::string set_sym = symbol + "__set_shared_host";
+    if (cthreads::kernels().sym(set_sym.c_str()) == nullptr) {
+        return;
+    }
+    using SetHostFn = void (*)(void*, void*);
+    cthreads::kernels().get<SetHostFn>(set_sym.c_str())(pack, host);
+}
+
+void promote_shared_params(
+    const std::string& symbol,
+    const py::list& params,
+    void* pack,
+    cthreads::SharedHost* host
+) {
+    if (!host) {
+        return;
+    }
+    py::module_ marshal = py::module_::import("cthreads.marshal");
+    marshal.attr("promote_shared_to_host")(
+        symbol,
+        params,
+        reinterpret_cast<std::uintptr_t>(pack),
+        reinterpret_cast<std::uintptr_t>(host)
     );
 }
 
@@ -332,29 +456,29 @@ std::function<void()> make_kernel_job(
     std::shared_ptr<py::list> params_keep
 ) {
     return [call_fn, self, params_keep]() mutable {
-        // Install TLS context so codegen'd `__sync_state()` can writeback mid-run.
         cthreads::detail::JobContext ctx{};
         ctx.state_mu = &self->state_mu;
         ctx.pack = self->pack;
+        ctx.shared_host = self->shared_host.get();
         ctx.symbol = &self->symbol;
         ctx.params = params_keep.get();
         ctx.values = self->values_keep.get();
         ctx.types = self->types_keep.get();
         ctx.schemas = self->schemas_keep.get();
+        ctx.meta = self->meta_keep.get();
         ctx.do_writeback = &job_do_writeback;
 
         set_job_context(&ctx);
         try {
-            call_fn(self->pack); // kernels trampoline with packed args
+            call_fn(self->pack);
         } catch (...) {
             set_job_context(nullptr);
+            self->unregister_shared_if_needed();
             throw;
         }
         set_job_context(nullptr);
 
         {
-            // Acquire GIL for Python writeback; hold state_mu so host sync_state
-            // cannot race final writeback.
             std::lock_guard<std::mutex> g(self->state_mu);
             py::gil_scoped_acquire gil;
             writeback_params(
@@ -363,9 +487,15 @@ std::function<void()> make_kernel_job(
                 *self->values_keep,
                 self->pack,
                 *self->types_keep,
-                *self->schemas_keep
+                *self->schemas_keep,
+                self->shared_host.get(),
+                *self->meta_keep
             );
-            *self->result = read_return(*self->meta_keep, self->pack);
+            // Copy shared return out of the host (demote+unpack), then free smem slots.
+            *self->result = read_return(
+                *self->meta_keep, self->pack, self->shared_host.get()
+            );
+            self->unregister_shared_if_needed();
             if (self->pack && self->free_fn) {
                 self->free_fn(self->pack);
                 self->pack = nullptr;
@@ -380,7 +510,7 @@ std::function<void()> make_kernel_job(
 Collects args from the python side and prepares the pack struct.
 Then builds the job body and either:
   - dedicated: wraps it in a CThread (unstarted), or
-  - pool: submits it to ``pool`` (already queued; Job.start is a no-op).
+  - pool: submits it to `pool` (already queued; Job.start is a no-op).
 
 Args:
 - meta: the compile time metadata from __kernel_meta__
@@ -389,6 +519,54 @@ Args:
 
 Returns:
 - std::shared_ptr<SpawnedKernel> = the spawned kernel object
+
+Example __kernel_meta__:
+```json
+{
+    "symbol": "move", # the name of the function
+    "call_symbol": "move__call", # the name of the function in the c++ translation
+    "params": [
+    {
+        "name": "p", # the name of the parameter
+        "pass_as": "ref", # Options: ref, value, shared (containers should always be passed as ref)
+        "kind": "threadable": # Options: threadable, list, dict, float ...
+        "cpp_type": "Particle", # the c++ type of the parameter
+        "schema": { # the schema of the parameter. (conatins infos for translation and fields)
+            "kind": "threadable", # the kind of the parameter
+            "cpp_type": "Particle", # the c++ type of the parameter
+            "type_name": "Particle", # the name of the parameter
+            "fields": [ # the fields of the parameter
+                {"name": "x", "schema": {"kind": "float", "cpp_type": "double", ...}}, # the fields of the parameter
+                {"name": "y", "schema": {"kind": "float", "cpp_type": "double", ...}}, # the fields of the parameter
+            ],
+        },
+    },
+    {
+        "name": "head", # the name of the parameter
+        "pass_as": "ref", # constainers should always be passed as ref
+        "kind": "list", # the kind of the parameter
+        "cpp_type": "std::vector<int>", # the c++ type of the parameter
+        "schema": { # the schema of the parameter. (conatins infos for translation and fields)
+            "kind": "list", # the kind of the parameter
+            "cpp_type": "std::vector<int>", # the c++ type of the parameter
+            "inner": {"kind": "int", "cpp_type": "int", ...}, # for containers, the inner type is also specified
+        },
+    ],
+    "types": { # types + schemas that contain the c++ -> python translation infos for write back and sync
+        "Particle": <class Particle>,   # real Python class
+    },
+    "schemas": {
+        "Particle": {
+        "kind": "threadable",
+        "cpp_type": "Particle",
+        "type_name": "Particle",
+        "fields": [
+            {"name": "x", "schema": {"kind": "float", "cpp_type": "double", ...}},
+            {"name": "y", "schema": {"kind": "float", "cpp_type": "double", ...}},
+        ],
+        },
+    },
+}```
 */
 std::shared_ptr<SpawnedKernel> spawn_from_meta(
     py::dict meta,
@@ -435,16 +613,28 @@ std::shared_ptr<SpawnedKernel> spawn_from_meta(
     // keep types/schemas outside try so we can store them on SpawnedKernel for mid-run sync
     py::dict types = py::dict();
     py::dict schemas = py::dict();
+    std::vector<std::string> shared_param_symbols;
+    std::vector<std::string> shared_cleanup_symbols;
+    const bool shared_return = meta_has_shared_return(meta);
     try {
-        // try to collect the types and schemas from the meta data
         if (meta.contains("types")) {
             types = meta["types"].cast<py::dict>();
         }
         if (meta.contains("schemas")) {
             schemas = meta["schemas"].cast<py::dict>();
         }
-        // write the actuall data to the pack struct (came from the kernel library, edited inplace here)
         fill_pack_from_values(symbol, params, ordered_values, pack, types, schemas);
+
+        std::shared_ptr<cthreads::SharedHost> host_sp =
+            pool ? pool->shared_host_keep() : default_shared_host;
+        cthreads::SharedHost* host = host_sp.get();
+        shared_param_symbols = shared_symbols_from_params(params);
+        shared_cleanup_symbols = shared_cleanup_symbols_from_meta(params, meta);
+        promote_shared_params(symbol, params, pack, host);
+        if (!shared_param_symbols.empty()) {
+            host->register_job(shared_param_symbols);
+        }
+        attach_shared_host_to_pack(symbol, pack, host);
     } catch (...) {
         cthreads::kernels().get<FreeFn>(free_sym.c_str())(pack);
         throw;
@@ -466,6 +656,11 @@ std::shared_ptr<SpawnedKernel> spawn_from_meta(
     // make a spawned kernel object to hold the job and relevant data
     auto spawned = std::make_shared<SpawnedKernel>();
     spawned->result = result_slot;
+    spawned->shared_host = pool ? pool->shared_host_keep() : default_shared_host;
+    spawned->shared_param_symbols = std::move(shared_param_symbols);
+    spawned->shared_cleanup_symbols = std::move(shared_cleanup_symbols);
+    spawned->shared_lifecycle_active =
+        !spawned->shared_param_symbols.empty() || shared_return;
     // own pack + marshal inputs for the full job lifetime (mid-run __sync_state / sync_state)
     spawned->pack = pack;
     spawned->free_fn = free_fn;
@@ -632,6 +827,20 @@ std::uintptr_t tbuffer_native_ptr(py::object obj, py::object type_name_obj = py:
         "cthreads.tbuffer_native_ptr: unsupported triple-buffer object type");
 }
 
+std::uintptr_t sync_native_ptr(py::object obj) {
+    if (py::isinstance<cthreads::sync::Event>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<cthreads::sync::Event&>());
+    }
+    if (py::isinstance<cthreads::sync::Lock>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<cthreads::sync::Lock&>());
+    }
+    if (py::isinstance<cthreads::sync::RWLock>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<cthreads::sync::RWLock&>());
+    }
+    throw std::runtime_error(
+        "cthreads.sync_native_ptr: expected Lock, Event, or RWLock");
+}
+
 #include "pool.tpp"
 
 } // namespace
@@ -662,6 +871,14 @@ PYBIND11_MODULE(_ext, m) {
         py::arg("type_name") = py::none(),
         "Return the native address of a cthreads.sync.TBuffer* object "
         "(or threadable capsule) for kernel marshalling."
+    );
+
+    m.def(
+        "sync_native_ptr",
+        &sync_native_ptr,
+        py::arg("obj"),
+        "Return the native address of a cthreads.sync Lock/Event/RWLock "
+        "for kernel marshalling."
     );
 
     m.def(

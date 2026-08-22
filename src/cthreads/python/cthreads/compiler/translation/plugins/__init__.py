@@ -73,6 +73,7 @@ __all__ = [
 
 # Side-effect: register concrete plugins (Attr: math/linalg before fields fallback)
 from . import stdlib as _stdlib  # noqa: E402, F401
+from . import shared as _shared  # noqa: E402, F401
 from . import cthreads_math as _cthreads_math  # noqa: E402, F401
 from . import sync as _sync  # noqa: E402, F401
 from . import linalg as _linalg  # noqa: E402, F401

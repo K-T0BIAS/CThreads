@@ -7,6 +7,7 @@ import pytest
 from cthreads import compile as ct_compile
 from cthreads.frontend.Registry import REGISTRY
 from cthreads.kernel_meta import KERNELS
+from helpers import is_kernel_load_failure, skip_if_kernel_runtime_error
 
 
 def test_compile_empty_registry_errors():
@@ -104,9 +105,7 @@ def test_prepare_build_and_thread_job(tmp_module):
         assert job.done()
         assert job.result() == 5
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
-            pytest.skip(str(e))
-        raise
+        skip_if_kernel_runtime_error(e)
     finally:
         try:
             unload_kernels()
@@ -145,9 +144,7 @@ def test_thread_job_await(tmp_module):
     try:
         assert asyncio.run(main()) == 15
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
-            pytest.skip(str(e))
-        raise
+        skip_if_kernel_runtime_error(e)
     finally:
         try:
             unload_kernels()
@@ -203,9 +200,7 @@ def test_mutable_list_dict_writeback_by_ref(tmp_module):
         job.join()
         assert d == {}
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
-            pytest.skip(str(e))
-        raise
+        skip_if_kernel_runtime_error(e)
     finally:
         try:
             unload_kernels()
@@ -258,12 +253,15 @@ def test_kernel_sync_state_mid_run_writeback(tmp_module):
                 break
             except RuntimeError as e:
                 last_err = e
-                if "LoadLibrary" not in str(e) and "dlopen" not in str(e):
+                if not is_kernel_load_failure(e):
                     raise
                 unload_kernels()
                 time.sleep(0.15)
         if job is None:
-            raise last_err  # type: ignore[misc]
+            assert last_err is not None
+            if isinstance(last_err, RuntimeError):
+                skip_if_kernel_runtime_error(last_err)
+            raise last_err
         job.start()
         saw_mid = False
         deadline = time.perf_counter() + 60.0
@@ -277,9 +275,7 @@ def test_kernel_sync_state_mid_run_writeback(tmp_module):
         assert ext._debug_ext_sync_invocations() >= 1
         assert saw_mid, "host never observed mid-run writeback from __sync_state()"
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
-            pytest.skip(str(e))
-        raise
+        skip_if_kernel_runtime_error(e)
     finally:
         try:
             unload_kernels()

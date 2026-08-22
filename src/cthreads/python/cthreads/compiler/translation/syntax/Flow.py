@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 
-from ....types import PyInt, PyList
+from ....types import PyInt, PyList, PyType, peel_shared
 from ..context import TranslationContext
 from .Op import Op
 
@@ -92,6 +92,8 @@ class Flow:
                 "for-iter must be a name or range(...)"
             )
         container_ty = ctx.symbols.get(it.id)
+        if isinstance(container_ty, PyType):
+            container_ty = peel_shared(container_ty)
         if not isinstance(container_ty, PyList):
             raise TypeError(
                 f"Thread function {ctx.func_name}: "

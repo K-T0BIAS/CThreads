@@ -217,7 +217,14 @@ def build(
         cmd.extend(str(s) for s in sources)
         cmd.extend(["-o", str(out)])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(root))
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(root),
+    )
 
     if flavor == "msvc":
         bat = root / "_cthreads_build.bat"

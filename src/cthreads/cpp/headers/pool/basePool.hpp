@@ -8,6 +8,8 @@
 #include <atomic>
 #include <memory>
 
+#include "../shared_host.hpp"
+
 
 namespace cthreads::pool {
 
@@ -23,6 +25,7 @@ namespace cthreads::pool {
             std::condition_variable cv{};
             std::atomic<bool> stop_signal{false};
 
+            std::shared_ptr<SharedHost> shared_host;
             
 
         public:
@@ -36,6 +39,7 @@ namespace cthreads::pool {
                 for (size_t i = 0; i < capacity; i++) {
                     this->thread_status[i].store(false);
                 }
+                this->shared_host = std::make_shared<SharedHost>();
             }
 
             BasePool(const BasePool& other) = delete;
@@ -65,6 +69,14 @@ namespace cthreads::pool {
 
             virtual size_t get_capacity() const final {
                 return capacity;
+            }
+
+            std::shared_ptr<SharedHost> shared_host_keep() const {
+                return shared_host;
+            }
+
+            SharedHost* shared_host_ptr() {
+                return shared_host.get();
             }
     };
 }

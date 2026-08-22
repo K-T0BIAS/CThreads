@@ -30,8 +30,8 @@ from .prepare import compile, prepare, thread
 from .build import build
 from .job import Job, wrap_job, sync_state
 from . import sync
+from .types import Shared, TBuffer
 from .sync import (
-    TBuffer,
     TBufferHandle,
     create_tbuffer,
     destroy_tbuffer,
@@ -85,6 +85,7 @@ __all__ = [
     "wrap_job",
     "sync_state",
     "__sync_state",
+    "Shared",
     "TBuffer",
     "TBufferHandle",
     "create_tbuffer",

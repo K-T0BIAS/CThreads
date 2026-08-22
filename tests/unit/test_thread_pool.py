@@ -11,6 +11,7 @@ import pytest
 
 from cthreads.job import Job
 from cthreads.pool.threadPool import ThreadPool as FacadeThreadPool
+from helpers import prepare_and_load_or_skip, skip_if_kernel_runtime_error
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +325,7 @@ def _prepare_pool_kernels(tmp_module, name: str):
     except ImportError as e:
         pytest.skip(f"cthreads._ext unavailable: {e}")
 
-    from cthreads import load_kernels, prepare, unload_kernels
+    from cthreads import unload_kernels
 
     mod = tmp_module(
         """
@@ -359,13 +360,9 @@ def _prepare_pool_kernels(tmp_module, name: str):
         name=name,
     )
     try:
-        unload_kernels()
-        binary = prepare(force=True)
-        load_kernels(str(binary))
+        prepare_and_load_or_skip(force=True)
     except RuntimeError as e:
-        if "compiler" in str(e).lower() or "Nothing registered" in str(e):
-            pytest.skip(str(e))
-        raise
+        skip_if_kernel_runtime_error(e)
     return mod, unload_kernels
 
 

@@ -57,3 +57,5 @@ cthreads_kernels.so
 libcthreads_kernels.so
 libcthreads_kernels.dylib
 # <<< cthreads (auto)
+
+todo.md

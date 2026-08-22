@@ -8,6 +8,8 @@ from ...types import (
     PyList,
     PyThreadable,
     hint_to_pytype,
+    is_sync_pytype,
+    is_shared_pytype,
     is_tbuffer_pytype,
 )
 from .context import TranslationContext
@@ -49,7 +51,9 @@ class Signature:
                 ctx.seen_sig,
                 include_for(py_type, ctx.this_file),
             )
-            if is_tbuffer_pytype(py_type) or isinstance(
+            if is_tbuffer_pytype(py_type) or is_sync_pytype(py_type) or is_shared_pytype(
+                py_type
+            ) or isinstance(
                 py_type, (PyThreadable, PyList, PyDict)
             ):
                 params.append(f"{py_type.cpp_name}& {arg.arg}")

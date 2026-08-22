@@ -1,5 +1,7 @@
 # Native types shipped in the pybind module (not codegen'd as Threadables).
 # keyed by Python class __name__ as exposed on cthreads.sync / cthreads.linalg
+SYNC_INTERNAL_NAMES: frozenset[str] = frozenset({"Lock", "Event", "RWLock"})
+
 CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
     "Lock": {
         "cpp_name": "cthreads::sync::Lock",

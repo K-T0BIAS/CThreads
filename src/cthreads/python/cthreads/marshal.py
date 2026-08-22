@@ -229,6 +229,16 @@ def _tbuffer_native_ptr(value: Any, inner_type_name: str | None = None) -> int:
     return tbuffer_ptr(value, inner_type_name)
 
 
+def _sync_native_ptr(value: Any) -> int:
+    import importlib
+
+    _ext = importlib.import_module("cthreads._ext")
+    ptr = int(_ext.sync_native_ptr(value))
+    if not ptr:
+        raise RuntimeError("cthreads.marshal: sync_native_ptr returned null")
+    return ptr
+
+
 def pack_value(
     lib,
     symbol: str,
@@ -365,6 +375,18 @@ def pack_value(
             value,
             inner_type_name=inner_name if inner.get("kind") == "threadable" else None,
         )
+        fn = _fn(lib, f"{symbol}__set_{prefix}_ptr")
+        _call(
+            fn,
+            None,
+            [ctypes.c_void_p, ctypes.c_void_p],
+            pack,
+            ctypes.c_void_p(ptr),
+        )
+        return
+
+    if kind == "sync":
+        ptr = _sync_native_ptr(value)
         fn = _fn(lib, f"{symbol}__set_{prefix}_ptr")
         _call(
             fn,
@@ -557,6 +579,64 @@ def pack_params(
         )
 
 
+def promote_shared_to_host(
+    symbol: str,
+    params: list[dict],
+    pack_ptr: int,
+    host_ptr: int,
+) -> None:
+    """Copy staged shared pack slots into the SharedHost (spawn time)."""
+    if not host_ptr:
+        return
+    lib = _lib()
+    pack = _pack_c(pack_ptr)
+    host = _pack_c(host_ptr)
+    for i, p in enumerate(params):
+        if p.get("pass_as") != "shared":
+            continue
+        fn = _fn(lib, f"{symbol}__promote_a{i}_shared")
+        _call(fn, None, [ctypes.c_void_p, ctypes.c_void_p], pack, host)
+
+
+def demote_shared_from_host(
+    symbol: str,
+    params: list[dict],
+    pack_ptr: int,
+    host_ptr: int,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    """Refresh staged pack slots from SharedHost before pack writeback."""
+    if not host_ptr:
+        return
+    lib = _lib()
+    pack = _pack_c(pack_ptr)
+    host = _pack_c(host_ptr)
+    for i, p in enumerate(params):
+        if p.get("pass_as") != "shared":
+            continue
+        fn = _fn(lib, f"{symbol}__demote_a{i}_shared")
+        _call(fn, None, [ctypes.c_void_p, ctypes.c_void_p], pack, host)
+    if meta and meta.get("return_pass_as") == "shared":
+        fn = _fn(lib, f"{symbol}__demote_return_shared")
+        _call(fn, None, [ctypes.c_void_p, ctypes.c_void_p], pack, host)
+
+
+def writeback_job_state(
+    symbol: str,
+    params: list[dict],
+    values: list[Any],
+    pack_ptr: int,
+    host_ptr: int,
+    types: dict[str, Any] | None = None,
+    schemas: dict[str, Any] | None = None,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    """Demote shared host state into the pack, then mirror ref args into Python."""
+    meta = meta or {}
+    demote_shared_from_host(symbol, params, pack_ptr, host_ptr, meta)
+    writeback_params(symbol, params, values, pack_ptr, types, schemas)
+
+
 def writeback_params(
     symbol: str,
     params: list[dict],
@@ -588,7 +668,18 @@ def writeback_params(
         )
 
 
-def unpack_return(meta: dict[str, Any], pack_ptr: int) -> Any:
+def unpack_return(
+    meta: dict[str, Any], pack_ptr: int, host_ptr: int = 0
+) -> Any:
+    meta = dict(meta)
+    if meta.get("return_pass_as") == "shared" and host_ptr:
+        demote_shared_from_host(
+            meta["symbol"],
+            meta.get("params") or [],
+            pack_ptr,
+            host_ptr,
+            meta,
+        )
     schema = meta.get("return_schema")
     if not schema:
         kind = meta.get("return_kind", "void")
@@ -672,4 +763,14 @@ def _legacy_schema(p: dict[str, Any]) -> dict[str, Any]:
             "cpp_type": p.get("cpp_type", ""),
             "inner": inner,
         }
+    if kind == "sync":
+        return {
+            "kind": "sync",
+            "cpp_type": p.get("cpp_type", ""),
+            "type_name": p.get("schema", {}).get("type_name") or p.get("type_name"),
+        }
+    if p.get("pass_as") == "shared":
+        schema = p.get("schema") or {}
+        if schema:
+            return schema
     raise TypeError(f"cannot legacy-upgrade kind {kind!r}")

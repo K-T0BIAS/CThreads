@@ -105,6 +105,60 @@ def test_pack_tbuffer_handle_uses_ptr(monkeypatch):
     handle._destroyed = True  # avoid __del__ calling into missing kernels
 
 
+def test_pack_sync_event_calls_set_ptr(monkeypatch):
+    captured: dict = {}
+
+    class FakeFn:
+        pass
+
+    set_ptr = FakeFn()
+
+    class FakeLib:
+        pass
+
+    lib = FakeLib()
+
+    def fake_fn(lib_obj, name):
+        if name == "run__set_a0_ptr":
+            return set_ptr
+        raise AssertionError(name)
+
+    def fake_call(fn, restype, argtypes, *args):
+        captured["fn"] = fn
+        captured["args"] = args
+
+    class FakeExt:
+        @staticmethod
+        def sync_native_ptr(obj):
+            del obj
+            return 0xFEED
+
+    import sys
+
+    monkeypatch.setattr(marshal, "_fn", fake_fn)
+    monkeypatch.setattr(marshal, "_call", fake_call)
+    monkeypatch.setitem(sys.modules, "cthreads._ext", FakeExt)
+
+    schema = {
+        "kind": "sync",
+        "cpp_type": "cthreads::sync::Event",
+        "type_name": "Event",
+    }
+    pack = ctypes.c_void_p(0x1000)
+    marshal.pack_value(
+        lib,
+        "run",
+        "a0",
+        schema,
+        object(),
+        marshal._Path(),
+        pack,
+    )
+    assert captured["fn"] is set_ptr
+    assert captured["args"][0].value == 0x1000
+    assert captured["args"][1].value == 0xFEED
+
+
 def test_writeback_skips_tbuffer(monkeypatch):
     monkeypatch.setattr(marshal, "_lib", lambda: object())
     monkeypatch.setattr(marshal, "_pack_c", lambda p: ctypes.c_void_p(p))

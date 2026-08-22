@@ -24,10 +24,14 @@ from .types import (
     PyInt,
     PyList,
     PyString,
+    PyShared,
     PyTBuffer,
     PyThreadable,
+    SYNC_INTERNAL_NAMES,
     TBUFFER_INTERNAL_NAMES,
     hint_to_pytype,
+    is_sync_pytype,
+    is_shared_pytype,
     is_tbuffer_pytype,
 )
 
@@ -37,7 +41,7 @@ KERNELS: dict = {}
 
 @dataclass
 class TypeSchema:
-    kind: str  # int|float|bool|str|threadable|list|dict|tbuffer
+    kind: str  # int|float|bool|str|threadable|list|dict|tbuffer|sync
     cpp_type: str
     # threadable
     type_name: str | None = None
@@ -81,13 +85,15 @@ class TypeSchema:
             d["inner"] = (
                 self.inner.to_dict(_seen=seen) if self.inner else None
             )
+        elif self.kind == "sync":
+            d["type_name"] = self.type_name
         return d
 
 
 @dataclass
 class ParamMeta:
     name: str
-    pass_as: str  # value | ref | ptr | tbuffer
+    pass_as: str  # value | ref | ptr | tbuffer | sync | shared
     schema: TypeSchema
 
     @property
@@ -136,6 +142,7 @@ class KernelMeta:
     args_free_symbol: str
     params: list[ParamMeta]
     return_schema: TypeSchema | None = None
+    return_pass_as: str | None = None
     is_method: bool = False
     layouts: dict[str, TypeSchema] = field(default_factory=dict)
 
@@ -166,6 +173,7 @@ class KernelMeta:
             "return_schema": (
                 self.return_schema.to_dict() if self.return_schema else None
             ),
+            "return_pass_as": self.return_pass_as,
             "return_kind": self.return_kind,
             "return_cpp_type": self.return_cpp_type,
             "return_fields": [
@@ -303,6 +311,19 @@ def hint_to_schema(
         schema.fields = fields
         return schema
 
+    if isinstance(py_type, PyShared):
+        from typing import get_args
+
+        inner_hint = getattr(hint, "__cthreads_shared_inner__", None)
+        if inner_hint is None:
+            args = get_args(hint)
+            inner_hint = args[0] if args else None
+        if inner_hint is None:
+            raise TypeError("Shared[...] missing inner type for schema")
+        return hint_to_schema(
+            inner_hint, types, _completed=completed, _stack=stack
+        )
+
     if isinstance(py_type, PyTBuffer):
         from typing import get_args
 
@@ -319,6 +340,16 @@ def hint_to_schema(
             "tbuffer",
             f"cthreads::sync::tripple_buffer<{inner.cpp_type}>",
             inner=inner,
+        )
+
+    if (
+        isinstance(py_type, PyCThreadsInternalType)
+        and py_type.name in SYNC_INTERNAL_NAMES
+    ):
+        return TypeSchema(
+            "sync",
+            py_type.cpp_name,
+            type_name=py_type.name,
         )
 
     if isinstance(py_type, PyCThreadsInternalType) and py_type.name in TBUFFER_INTERNAL_NAMES:
@@ -380,6 +411,10 @@ def build_kernel_meta(
         py_type = hint_to_pytype(hint)
         if is_tbuffer_pytype(py_type):
             pass_as = "tbuffer"
+        elif is_sync_pytype(py_type):
+            pass_as = "sync"
+        elif is_shared_pytype(py_type):
+            pass_as = "shared"
         elif isinstance(py_type, (PyThreadable, PyList, PyDict)):
             pass_as = "ref"
         else:
@@ -392,10 +427,14 @@ def build_kernel_meta(
 
     ret_hint = hints.get("return", None)
     return_schema: TypeSchema | None = None
+    return_pass_as: str | None = None
     if ret_hint is not None and ret_hint is not type(None):
+        ret_py = hint_to_pytype(ret_hint)
         return_schema = hint_to_schema(
             ret_hint, types, _completed=completed
         )
+        if is_shared_pytype(ret_py):
+            return_pass_as = "shared"
 
     meta = KernelMeta(
         symbol=symbol,
@@ -404,6 +443,7 @@ def build_kernel_meta(
         args_free_symbol=f"{symbol}__args_free",
         params=params,
         return_schema=return_schema,
+        return_pass_as=return_pass_as,
         is_method=owner_name is not None,
         layouts=dict(completed),
     )
@@ -415,6 +455,9 @@ def build_kernel_meta(
     }
     if return_schema and return_schema.kind == "threadable" and return_schema.type_name:
         meta_dict["return_cls"] = types.get(return_schema.type_name)
+    if return_pass_as:
+        meta_dict["return_pass_as"] = return_pass_as
+        meta_dict["return_shared_name"] = "__return__"
     fn.__kernel_meta__ = meta_dict
     fn.__kernel_symbol__ = symbol
     return meta
@@ -668,6 +711,16 @@ def _emit_schema_accessors_fixed(
         lines.append("}")
         return
 
+    if schema.kind == "sync":
+        lines.append(
+            f"CTHREADS_API void {symbol}__set_{prefix}_ptr(void* p{extra}, void* buf) {{"
+        )
+        lines.append(
+            f"    static_cast<{struct}*>(p)->{prefix} = static_cast<{schema.cpp_type}*>(buf);"
+        )
+        lines.append("}")
+        return
+
     raise TypeError(f"cannot emit accessors for kind {schema.kind!r}")
 
 
@@ -679,8 +732,9 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
     needs_cstddef = True
 
     lines.append(f"struct {struct} {{")
+    lines.append("    cthreads::SharedHost* __shared_host = nullptr;")
     for i, p in enumerate(meta.params):
-        if p.schema.kind == "tbuffer":
+        if p.schema.kind == "tbuffer" or p.schema.kind == "sync":
             lines.append(f"    {p.schema.cpp_type}* a{i};")
         else:
             lines.append(f"    {p.cpp_type} a{i};")
@@ -695,6 +749,15 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
     lines.append("")
     lines.append(f"CTHREADS_API void {meta.args_free_symbol}(void* p) {{")
     lines.append(f"    delete static_cast<{struct}*>(p);")
+    lines.append("}")
+    lines.append("")
+    lines.append(
+        f"CTHREADS_API void {meta.symbol}__set_shared_host(void* p, void* host) {{"
+    )
+    lines.append(
+        f"    static_cast<{struct}*>(p)->__shared_host = "
+        "static_cast<cthreads::SharedHost*>(host);"
+    )
     lines.append("}")
     lines.append("")
 
@@ -733,6 +796,29 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
             layouts=meta.layouts,
         )
         lines.append("")
+        if p.pass_as == "shared":
+            lines.append(
+                f"CTHREADS_API void {meta.symbol}__promote_a{i}_shared("
+                f"void* p, cthreads::SharedHost* h) {{"
+            )
+            lines.append(f"    if (!h) return;")
+            lines.append(
+                f"    h->set(\"{p.name}\", "
+                f"std::move(static_cast<{struct}*>(p)->a{i}));"
+            )
+            lines.append("}")
+            lines.append("")
+            lines.append(
+                f"CTHREADS_API void {meta.symbol}__demote_a{i}_shared("
+                f"void* p, cthreads::SharedHost* h) {{"
+            )
+            lines.append(f"    if (!h || !h->contains(\"{p.name}\")) return;")
+            lines.append(
+                f"    static_cast<{struct}*>(p)->a{i} = "
+                f"h->get<{p.cpp_type}>(\"{p.name}\");"
+            )
+            lines.append("}")
+            lines.append("")
 
     if meta.return_schema is not None:
         walk_needs(meta.return_schema)
@@ -750,13 +836,30 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
         )
         lines.append("")
 
+    if meta.return_pass_as == "shared" and meta.return_schema is not None:
+        lines.append(
+            f"CTHREADS_API void {meta.symbol}__demote_return_shared("
+            f"void* p, cthreads::SharedHost* h) {{"
+        )
+        lines.append("    if (!h || !h->contains(\"__return__\")) return;")
+        lines.append(
+            f"    static_cast<{struct}*>(p)->ret = "
+            f"h->get<{meta.return_schema.cpp_type}>(\"__return__\");"
+        )
+        lines.append("}")
+        lines.append("")
+
     call_args: list[str] = []
     for i, p in enumerate(meta.params):
         slot = f"a->a{i}"
         if p.pass_as == "ptr":
             call_args.append(f"&{slot}")
-        elif p.pass_as == "tbuffer":
+        elif p.pass_as in ("tbuffer", "sync"):
             call_args.append(f"*{slot}")
+        elif p.pass_as == "shared":
+            call_args.append(
+                f"a->__shared_host->get<{p.cpp_type}>(\"{p.name}\")"
+            )
         elif p.pass_as == "ref":
             call_args.append(slot)
         else:
@@ -766,13 +869,22 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
     lines.append(f"    auto* a = static_cast<{struct}*>(p);")
     if meta.return_schema is None:
         lines.append(f"    {real_call}({args_csv});")
+    elif meta.return_pass_as == "shared":
+        lines.append(f"    a->ret = {real_call}({args_csv});")
+        lines.append(
+            "    if (a->__shared_host) {"
+        )
+        lines.append(
+            f"        a->__shared_host->replace(\"__return__\", std::move(a->ret));"
+        )
+        lines.append("    }")
     else:
         lines.append(f"    a->ret = {real_call}({args_csv});")
     lines.append("}")
     lines.append("")
 
     body = "\n".join(lines)
-    headers = ""
+    headers = "#include \"shared_host.hpp\"\n"
     if needs_cstddef:
         headers += "#include <cstddef>\n"
     if needs_cstring:
@@ -787,6 +899,7 @@ def emit_trampoline_decls(meta: KernelMeta) -> str:
         f"CTHREADS_API void* {meta.args_new_symbol}();",
         f"CTHREADS_API void {meta.args_free_symbol}(void* p);",
         f"CTHREADS_API void {meta.call_symbol}(void* p);",
+        f"CTHREADS_API void {meta.symbol}__set_shared_host(void* p, void* host);",
     ]
     return "\n".join(lines) + "\n"
 

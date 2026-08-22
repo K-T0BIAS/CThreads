@@ -1,7 +1,15 @@
 from typing import Any, get_origin, get_args
 
 from .pyType import PyType
-from .internal import is_internal_cthreads_type, PyTBuffer, PyCThreadsInternalType, PyThreadable, CTHREADS_INTERNAL_TYPES
+from .internal import (
+    is_internal_cthreads_type,
+    is_shared_pytype,
+    PyShared,
+    PyTBuffer,
+    PyCThreadsInternalType,
+    PyThreadable,
+    CTHREADS_INTERNAL_TYPES,
+)
 from .py import PyInt, PyFloat, PyString, PyBool, PyList, PyDict
 
 def hint_to_pytype(hint: Any) -> PyType:
@@ -41,6 +49,17 @@ def hint_to_pytype(hint: Any) -> PyType:
     }
     if hint in primitives:
         return primitives[hint]()
+
+    # check if the hint denotes a Shared[inner] type and set the inner type hint if it does
+    if getattr(hint, "__cthreads_shared__", False):
+        inner_hint = getattr(hint, "__cthreads_shared_inner__", None)
+        if inner_hint is None:
+            args = get_args(hint)
+            if args:
+                inner_hint = args[0]
+        if inner_hint is None:
+            raise TypeError("Shared[...] requires an element type annotation")
+        return PyShared(hint_to_pytype(inner_hint))
 
     # TBuffer[inner] — codegen uses tripple_buffer<inner_cpp> in the kernel.
     if getattr(hint, "__cthreads_tbuffer__", False):

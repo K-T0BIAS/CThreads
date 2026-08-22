@@ -1,6 +1,7 @@
 from typing import Any
 
 from ..pyType import PyType
+from .include_map import SYNC_INTERNAL_NAMES
 from .pyCThreadsInternalType import PyCThreadsInternalType
 
 class TBuffer:
@@ -59,4 +60,12 @@ def is_tbuffer_pytype(py_type: PyType) -> bool:
     return isinstance(py_type, PyTBuffer) or (
         isinstance(py_type, PyCThreadsInternalType)
         and py_type.name in TBUFFER_INTERNAL_NAMES
+    )
+
+
+def is_sync_pytype(py_type: PyType) -> bool:
+    """True for ``Lock`` / ``Event`` / ``RWLock`` kernel params (non-copyable)."""
+    return (
+        isinstance(py_type, PyCThreadsInternalType)
+        and py_type.name in SYNC_INTERNAL_NAMES
     )

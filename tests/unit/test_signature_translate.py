@@ -39,6 +39,17 @@ def test_signature_mutables_pass_by_ref():
     )
 
 
+def test_signature_shared_pass_by_ref():
+    from cthreads.types import Shared
+
+    def worker(head: Shared[list[int]]) -> None:
+        pass
+
+    ctx = TranslationContext(fn=worker, this_file=Path("x.hpp"))
+    parts = Signature.translate(Source.parse_function(worker), ctx)
+    assert parts.params_csv == "std::vector<int>& head"
+
+
 def test_signature_missing_annotation():
     def f(a):
         pass

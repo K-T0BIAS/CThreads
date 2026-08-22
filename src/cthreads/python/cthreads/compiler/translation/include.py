@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from ...frontend.Registry import REGISTRY
-from ...types import PyType, PyThreadable, PyList, PyDict, PyTBuffer
+from ...types import PyType, PyThreadable, PyList, PyDict, PyTBuffer, PyShared
 
 
 def add_include(bucket: list[str], seen: set[str], text: str) -> None:
@@ -44,6 +44,9 @@ def include_for(py_type: PyType, this_file: Path | str) -> str:
             + include_for(py_type.value_type, this_file)
         )
     if isinstance(py_type, PyTBuffer):
+        return PyType.build_include(py_type) + include_for(py_type.inner_type, this_file)
+
+    if isinstance(py_type, PyShared):
         return PyType.build_include(py_type) + include_for(py_type.inner_type, this_file)
 
     return py_type.build_include()

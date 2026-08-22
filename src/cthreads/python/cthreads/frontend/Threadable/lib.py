@@ -50,6 +50,15 @@ def is_threadable(item: Any) -> bool:
         if inner is not None:
             is_threadable(inner)
         return True
+    if getattr(item, "__cthreads_shared__", False):
+        inner = getattr(item, "__cthreads_shared_inner__", None)
+        if inner is None:
+            args = get_args(item)
+            if args:
+                inner = args[0]
+        if inner is not None:
+            is_threadable(inner)
+        return True
     if is_internal_cthreads_type(item):
         return True
     if isinstance(item, type) and getattr(item, "__threadable", False):

@@ -12,7 +12,7 @@ from cthreads.kernel_meta import (
     emit_trampoline_cpp,
     emit_trampoline_decls,
 )
-from cthreads.types import TBuffer
+from cthreads.types import TBuffer, Shared
 
 
 def _prim(kind: str) -> TypeSchema:
@@ -221,6 +221,37 @@ def test_emit_trampoline_tbuffer_ptr():
     assert "fill(*a->a0);" in cpp
 
 
+def test_build_kernel_meta_event_pass_as_sync():
+    class Event:
+        __cthreads_internal__ = True
+
+    @Thread
+    def wait_stop(stop: Event, n: int) -> None:
+        pass
+
+    meta = build_kernel_meta(wait_stop, symbol="wait_stop")
+    assert meta.params[0].kind == "sync"
+    assert meta.params[0].pass_as == "sync"
+    assert meta.params[0].schema.type_name == "Event"
+    assert meta.params[0].schema.cpp_type == "cthreads::sync::Event"
+
+
+def test_emit_trampoline_event_ptr():
+    ev = TypeSchema("sync", "cthreads::sync::Event", type_name="Event")
+    meta = KernelMeta(
+        symbol="run",
+        call_symbol="run__call",
+        args_new_symbol="run__new",
+        args_free_symbol="run__free",
+        params=[ParamMeta("stop", "sync", ev)],
+        return_schema=None,
+    )
+    cpp = emit_trampoline_cpp(meta, real_call="run")
+    assert "cthreads::sync::Event* a0;" in cpp
+    assert "run__set_a0_ptr(void* p, void* buf)" in cpp
+    assert "run(*a->a0);" in cpp
+
+
 def test_build_kernel_meta_missing_owner():
     @Thread
     def step(self, dt: float) -> None:
@@ -314,3 +345,110 @@ def test_emit_trampoline_list_return():
     assert "std::vector<Particle> ret;" in cpp
     assert "all__ret_resize" in cpp
     assert "all__set_ret_elem_x" in cpp
+
+
+def test_build_kernel_meta_shared_pass_as():
+    @Thread
+    def worker(head: Shared[list[int]], n: int) -> None:
+        pass
+
+    meta = build_kernel_meta(worker, symbol="worker")
+    assert meta.params[0].pass_as == "shared"
+    assert meta.params[0].schema.kind == "list"
+    assert meta.params[1].pass_as == "value"
+
+
+def test_emit_trampoline_shared_host_and_promote():
+    lst = TypeSchema("list", "std::vector<int>", inner=TypeSchema("int", "int"))
+    meta = KernelMeta(
+        symbol="worker",
+        call_symbol="worker__call",
+        args_new_symbol="worker__new",
+        args_free_symbol="worker__free",
+        params=[
+            ParamMeta("head", "shared", lst),
+            ParamMeta("n", "value", TypeSchema("int", "int")),
+        ],
+        return_schema=None,
+    )
+    cpp = emit_trampoline_cpp(meta, real_call="worker")
+    assert "SharedHost* __shared_host" in cpp
+    assert "worker__set_shared_host" in cpp
+    assert "worker__promote_a0_shared" in cpp
+    assert "worker__demote_a0_shared" in cpp
+    assert 'a->__shared_host->get<std::vector<int>>("head")' in cpp
+
+
+def test_emit_trampoline_shared_return():
+    meta = KernelMeta(
+        symbol="pick",
+        call_symbol="pick__call",
+        args_new_symbol="pick__new",
+        args_free_symbol="pick__free",
+        params=[],
+        return_schema=TypeSchema("int", "int"),
+        return_pass_as="shared",
+    )
+    cpp = emit_trampoline_cpp(meta, real_call="pick")
+    assert "pick__demote_return_shared" in cpp
+    assert 'replace("__return__"' in cpp
+
+
+def test_build_kernel_meta_shared_return_pass_as():
+    @Thread
+    def pick() -> Shared[int]:
+        return 0
+
+    meta = build_kernel_meta(pick, symbol="pick")
+    assert meta.return_pass_as == "shared"
+    d = meta.to_dict()
+    assert d["return_pass_as"] == "shared"
+    assert pick.__kernel_meta__["return_shared_name"] == "__return__"
+
+
+def test_build_kernel_meta_shared_threadable_and_dict():
+    @Threadable
+    class Box:
+        v: int
+
+    @Thread
+    def mix(head: Shared[list[int]], box: Shared[Box], m: Shared[dict[str, int]]) -> None:
+        pass
+
+    meta = build_kernel_meta(mix, symbol="mix")
+    assert [p.pass_as for p in meta.params] == ["shared", "shared", "shared"]
+    assert meta.params[0].schema.kind == "list"
+    assert meta.params[1].schema.kind == "threadable"
+    assert meta.params[2].schema.kind == "dict"
+
+
+def test_emit_trampoline_decls_include_set_shared_host():
+    meta = KernelMeta(
+        symbol="w",
+        call_symbol="w__call",
+        args_new_symbol="w__new",
+        args_free_symbol="w__free",
+        params=[ParamMeta("x", "value", TypeSchema("int", "int"))],
+    )
+    decls = emit_trampoline_decls(meta)
+    assert "w__set_shared_host" in decls
+
+
+def test_emit_trampoline_multiple_shared_promote_demote():
+    meta = KernelMeta(
+        symbol="w",
+        call_symbol="w__call",
+        args_new_symbol="w__new",
+        args_free_symbol="w__free",
+        params=[
+            ParamMeta("a", "shared", TypeSchema("int", "int")),
+            ParamMeta("b", "shared", TypeSchema("float", "double")),
+        ],
+    )
+    cpp = emit_trampoline_cpp(meta, real_call="w")
+    assert "w__promote_a0_shared" in cpp
+    assert "w__promote_a1_shared" in cpp
+    assert "w__demote_a0_shared" in cpp
+    assert "w__demote_a1_shared" in cpp
+    assert 'h->set("a"' in cpp
+    assert 'h->set("b"' in cpp

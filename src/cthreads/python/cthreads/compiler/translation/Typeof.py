@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 
 from ...frontend.Registry import REGISTRY
-from ...types import PyList, PyThreadable, PyType
+from ...types import PyList, PyThreadable, PyType, peel_shared
 from .context import TranslationContext
 
 
@@ -21,7 +21,9 @@ class Typeof:
     def of(node: ast.expr, ctx: TranslationContext) -> PyType | None:
         if isinstance(node, ast.Name):
             ty = ctx.symbols.get(node.id)
-            return ty if isinstance(ty, PyType) else None
+            if isinstance(ty, PyType):
+                return peel_shared(ty)
+            return None
 
         if isinstance(node, ast.Attribute):
             base = Typeof.of(node.value, ctx)

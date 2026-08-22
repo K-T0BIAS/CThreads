@@ -21,11 +21,13 @@ namespace cthreads::detail {
 struct JobContext {
     std::mutex* state_mu = nullptr;
     void* pack = nullptr;
+    void* shared_host = nullptr;
     void* symbol = nullptr;   // std::string*
     void* params = nullptr;   // py::list*
     void* values = nullptr;   // py::list*
     void* types = nullptr;    // py::dict*
     void* schemas = nullptr;  // py::dict*
+    void* meta = nullptr;     // py::dict*
     void (*do_writeback)(JobContext*) = nullptr;
 };
 

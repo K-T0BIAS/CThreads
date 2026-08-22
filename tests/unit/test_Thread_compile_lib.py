@@ -41,6 +41,34 @@ def test_include_for_stdlib_and_threadable(tmp_path):
     assert text.startswith("#include")
 
 
+def test_include_for_shared_threadable(tmp_path):
+    from cthreads.types import PyShared, Shared, hint_to_pytype
+
+    this_file = tmp_path / "out" / "worker.hpp"
+    this_file.parent.mkdir(parents=True)
+
+    cls = type("Box", (), {"__threadable": True})
+    REGISTRY.register_threadable(cls)
+    hpp = tmp_path / "__Threadable__" / "Box.hpp"
+    hpp.parent.mkdir(parents=True)
+    hpp.write_text("struct Box { int n; };\n", encoding="utf-8")
+    REGISTRY.threadable_units["Box"] = ThreadableUnit(
+        handle=Handle(name="Box", path="box.py", target=cls),
+        fields={},
+        hpp_path=hpp,
+        cpp_path=hpp.with_suffix(".cpp"),
+    )
+
+    py = hint_to_pytype(Shared[cls])
+    assert isinstance(py, PyShared)
+    assert "shared_host.hpp" in py.build_include()
+    assert "Box.hpp" not in py.build_include()
+
+    text = include_for(py, this_file)
+    assert "shared_host.hpp" in text
+    assert "Box.hpp" in text
+
+
 def test_cpp_literal_types_and_escape():
     assert Cpp.literal(True) == "true"
     assert Cpp.literal(False) == "false"

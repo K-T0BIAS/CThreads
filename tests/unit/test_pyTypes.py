@@ -94,6 +94,26 @@ def test_hint_to_pytype_tbuffer_internal():
     assert "#include <vector>" in py_list.build_include()
 
 
+def test_hint_to_pytype_shared():
+    from cthreads.types import PyShared, Shared
+
+    py = hint_to_pytype(Shared[list[int]])
+    assert isinstance(py, PyShared)
+    assert py.cpp_name == "std::vector<int>"
+    assert "shared_host.hpp" in py.build_include()
+    assert "vector" in py.inner_type.build_include()
+
+
+def test_hint_to_pytype_shared_missing_inner():
+    from cthreads.types import Shared
+
+    class BadShared:
+        __cthreads_shared__ = True
+
+    with pytest.raises(TypeError, match="Shared\\[...\\] requires"):
+        hint_to_pytype(BadShared)
+
+
 def test_hint_to_pytype_linalg_internal():
     class ArrayF32:
         __cthreads_internal__ = True
