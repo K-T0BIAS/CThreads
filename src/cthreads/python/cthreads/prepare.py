@@ -1,6 +1,10 @@
-"""High-level prepare + thread entry for V2."""
+"""
+Copyright (c) 2026 Tobias Karusseit
+This source code is licensed under the MIT license found in the
+LICENSE file in the root directory of this source tree.
 
-from __future__ import annotations
+High-level prepare + thread entry for V2.
+"""
 
 from pathlib import Path
 from typing import Any
@@ -14,18 +18,20 @@ def compile(force: bool = False) -> dict:
     """
     Drain the V2 registry into units, emit C++, write tbuffer runtime.
 
-    Unchanged units (matching ``src_hash``) skip translate/emit and only
-    refresh kernel meta unless ``force`` is True.
+    Units that are unchanged (if the src_hash matches the previous one) skip translate/emit and only.
+    Refreshes the kernel meta unless `force` is True.
     """
     return CompileSession.compile(force=force)
 
 
 def prepare(force: bool = False) -> Path:
     """
-    Codegen + native build.
+    Runs Codegen and builds the native code (native code is the compiled dll file)
 
-    Does **not** unload a loaded kernel library. On Windows a force-relink
-    over an already-loaded DLL will fail — call ``unload_kernels()`` first.
+    Does NOT unload a loaded kernel library (cthreads.unload_kernels()).
+
+    #### Warnings/Notes:
+    - On Windows a force-relink over an already-loaded DLL will fail. Call `unload_kernels()` first. (This is only relevant if u compile multiple times in the same process)
     """
     info = compile(force=force)
     return build(project_root=info["root"], force=force)
@@ -33,9 +39,33 @@ def prepare(force: bool = False) -> Path:
 
 def thread(fn, *args: Any, force: bool = False, **kwargs: Any) -> Job:
     """
-    Return an awaitable Job on the currently loaded kernels.
+    Puts the function `fn` into a C++ thread and returns a `Job` object for state management of this thread.
+    The Job object is awaitable and will return the result of the function when it is done.
 
-    Pack/unpack goes through ``cthreads.marshal`` (imported by ``_ext``).
+    #### Arguments:
+    - `fn`: The function to put into a C++ thread.
+    - `*args`: Arguments to pass to the function.
+    - `force`: If True, force a retranslation of all the @Threads and @Threadables and a recompile of the generated C++ code.
+    - `**kwargs`: Keyword arguments to pass to the function.
+
+    #### Returns:
+    - A `Job` object that can be awaited to get the result of the function.
+
+    #### Example:
+    ```python
+    import cthreads
+    from cthreads import Thread
+
+    @Thread
+    def my_function(name: str) -> str:
+        res: str = "Hello, "+name+"!"
+        return res
+
+    job = cthreads.thread(my_function, "World")
+    job.join()
+    result = job.result()
+    print(result)
+    ```
     """
     from . import _ext_api
 
@@ -53,4 +83,5 @@ def thread(fn, *args: Any, force: bool = False, **kwargs: Any) -> Job:
         binary = prepare(force=False)
         _ext_api.load_kernels(str(binary))
 
+    # Wrap the threaded function in a Job object and return it.
     return wrap_job(_ext_api.thread(fn, *args, **kwargs))

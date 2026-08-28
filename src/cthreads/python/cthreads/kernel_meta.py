@@ -3,10 +3,37 @@ Copyright (c) 2026 Tobias Karusseit
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 
-Kernel metadata + trampoline emission for dispatch.
+This module builds compile-time kernel metadata and emits C++ trampoline code.
 
-Params and returns share one recursive TypeSchema so pack / writeback /
-job.result() all use the same shape (primitives, Threadable, list, dict).
+For each compiled `@Thread` function it produces a `KernelMeta` record
+(`TypeSchema` for every parameter and return) and generates the pack struct plus
+trampoline accessors that `cthreads.marshal` calls at runtime. Parameters and
+returns share one recursive schema shape so pack, writeback, and
+`job.result()` all round-trip the same way.
+
+`build_kernel_meta` runs at compile time and stores metadata on
+`fn.__kernel_meta__`. `emit_trampoline_cpp` and `emit_trampoline_decls` write the
+native pack lifecycle symbols and field accessors into each kernel translation
+unit.
+
+#### Technical terms:
+- TypeSchema: recursive description of one parameter or return type (`kind`,
+  `fields`, `inner`, and related keys) used by marshal and codegen.
+- KernelMeta: full compile record for one kernel (`symbol`, params, return,
+  layouts, and trampoline symbol names).
+- pack: per-job C++ args struct named `{symbol}__args`; holds `a0`, `a1`, ...,
+  optional `ret`, and `__shared_host`.
+- symbol: export prefix of a compiled kernel (for example `move`); starts every
+  generated accessor name.
+- prefix: field segment in accessor names (`a0`, `a0_x`, `ret`, `a0_elem`).
+- trampoline accessor: small exported C function that reads or writes one pack
+  field (`move__set_a0_x`, `move__a0_resize`, and similar).
+- pass_as: how a parameter is passed into the real kernel call (`value`, `ref`,
+  `ptr`, `tbuffer`, `sync`, or `shared`).
+- layouts: map of Threadable type names to their full `TypeSchema` for cycle-safe
+  accessor emission.
+- is_ref: when true on a Threadable schema, marshal looks up the full layout in
+  `meta["schemas"]` instead of inline fields.
 """
 
 from __future__ import annotations
@@ -35,26 +62,45 @@ from .types import (
     is_tbuffer_pytype,
 )
 
-# Filled by build_kernel_meta(); cleared by CompileSession.compile()
+# Populated by build_kernel_meta(); cleared when CompileSession.compile() runs.
 KERNELS: dict = {}
 
 
 @dataclass
 class TypeSchema:
-    kind: str  # int|float|bool|str|threadable|list|dict|tbuffer|sync
+    """
+    Recursive compile-time type layout for one marshal or codegen slot.
+
+    Serialized through `to_dict()` into `fn.__kernel_meta__["schemas"]` and
+    per-parameter `schema` entries for marshal.
+    """
+
+    kind: str  # int, float, bool, str, threadable, list, dict, tbuffer, or sync
     cpp_type: str
-    # threadable
+    # threadable-only fields
     type_name: str | None = None
     fields: list[tuple[str, TypeSchema]] = field(default_factory=list)
-    # True => look up full layout in meta["schemas"][type_name] (cycle break)
+    # When true, marshal resolves the full layout from meta["schemas"][type_name].
     is_ref: bool = False
-    # list
+    # list-only field
     inner: TypeSchema | None = None
-    # dict
+    # dict-only fields
     key: TypeSchema | None = None
     value: TypeSchema | None = None
 
     def to_dict(self, *, _seen: frozenset[str] | None = None) -> dict[str, Any]:
+        """
+        Serialize this schema to a JSON-friendly dict for `__kernel_meta__`.
+
+        Threadable cycles are broken by emitting `is_ref: true` and empty
+        `fields` when a type is seen again on the recursion stack.
+
+        #### Args:
+        - _seen: frozenset[str] = Threadable type names already being serialized
+
+        #### Returns
+        - dict = schema node understood by marshal and tests
+        """
         seen = _seen or frozenset()
         d: dict[str, Any] = {
             "kind": self.kind,
@@ -92,8 +138,12 @@ class TypeSchema:
 
 @dataclass
 class ParamMeta:
+    """
+    One kernel parameter: Python name, pass mode, and recursive `TypeSchema`.
+    """
+
     name: str
-    pass_as: str  # value | ref | ptr | tbuffer | sync | shared
+    pass_as: str  # value, ref, ptr, tbuffer, sync, or shared
     schema: TypeSchema
 
     @property
@@ -106,7 +156,14 @@ class ParamMeta:
 
     @property
     def fields(self) -> list:
-        """Compat: flat FieldMeta-like objects for primitive threadable fields only."""
+        """
+        Flat field list for older tests and binder snippets.
+
+        Only exposes primitive Threadable fields as simple name/kind objects.
+
+        #### Returns
+        - list = lightweight stand-ins with `name` and `kind` attributes
+        """
         return [
             type("F", (), {"name": n, "kind": s.kind})()
             for n, s in self.schema.fields
@@ -114,18 +171,27 @@ class ParamMeta:
 
     @property
     def list_inner(self) -> str | None:
+        """Return the inner primitive kind when this param is a list, else None."""
         if self.schema.kind == "list" and self.schema.inner:
             return self.schema.inner.kind
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        """
+        Serialize this parameter for `fn.__kernel_meta__["params"]`.
+
+        Includes both nested `schema` and legacy flat keys for compatibility.
+
+        #### Returns
+        - dict = parameter metadata consumed by marshal and module.cpp
+        """
         return {
             "name": self.name,
             "pass_as": self.pass_as,
             "kind": self.schema.kind,
             "cpp_type": self.schema.cpp_type,
             "schema": self.schema.to_dict(),
-            # compat keys used by older binder snippets / tests
+            # Legacy flat keys kept for older binder snippets and tests.
             "fields": [
                 {"name": n, "kind": s.kind, "schema": s.to_dict()}
                 for n, s in self.schema.fields
@@ -136,6 +202,13 @@ class ParamMeta:
 
 @dataclass
 class KernelMeta:
+    """
+    Compile-time record for one `@Thread` kernel.
+
+    Holds trampoline symbol names, parameter metadata, return layout, and
+    Threadable layouts used when emitting accessors into the kernel DLL.
+    """
+
     symbol: str
     call_symbol: str
     args_new_symbol: str
@@ -148,14 +221,22 @@ class KernelMeta:
 
     @property
     def return_kind(self) -> str:
+        """Return schema kind, or `void` when the kernel has no return value."""
         return self.return_schema.kind if self.return_schema else "void"
 
     @property
     def return_cpp_type(self) -> str | None:
+        """Return C++ type name from the return schema, if any."""
         return self.return_schema.cpp_type if self.return_schema else None
 
     @property
     def return_fields(self) -> list:
+        """
+        Flat Threadable return fields for legacy metadata consumers.
+
+        #### Returns
+        - list = empty when return is not a Threadable; else name/kind stand-ins
+        """
         if not self.return_schema or self.return_schema.kind != "threadable":
             return []
         return [
@@ -164,6 +245,12 @@ class KernelMeta:
         ]
 
     def to_dict(self) -> dict[str, Any]:
+        """
+        Serialize kernel metadata for `fn.__kernel_meta__` and the native binder.
+
+        #### Returns
+        - dict = symbol names, params, return layout, and legacy flat return keys
+        """
         return {
             "symbol": self.symbol,
             "call_symbol": self.call_symbol,
@@ -189,6 +276,15 @@ class KernelMeta:
 
 
 def _primitive_cpp(kind: str) -> str:
+    """
+    Map a marshal primitive kind to its C++ type spelling.
+
+    #### Args:
+    - kind: str = one of `int`, `float`, `bool`, or `str`
+
+    #### Returns
+    - str = C++ type used in generated pack fields and accessors
+    """
     return {
         "int": "int",
         "float": "double",
@@ -198,7 +294,21 @@ def _primitive_cpp(kind: str) -> str:
 
 
 def _tbuffer_inner_schema(py_type: PyCThreadsInternalType) -> TypeSchema:
-    """Build element schema for fixed ``cthreads.sync.TBuffer*`` classes."""
+    """
+    Build the element `TypeSchema` for fixed `cthreads.sync.TBuffer*` classes.
+
+    These are concrete buffer typedefs (not generic `TBuffer[T]`) with a known
+    element layout at compile time.
+
+    #### Args:
+    - py_type: PyCThreadsInternalType = internal TBuffer class descriptor
+
+    #### Returns
+    - TypeSchema = element layout stored inside the tbuffer param schema
+
+    #### Raises
+    - TypeError = internal TBuffer name is not recognized
+    """
     fixed: dict[str, TypeSchema] = {
         "TBufferF64": TypeSchema("float", "double"),
         "TBufferI64": TypeSchema("int", "int"),
@@ -228,7 +338,30 @@ def hint_to_schema(
     _completed: dict[str, TypeSchema] | None = None,
     _stack: frozenset[str] | None = None,
 ) -> TypeSchema:
-    """Build a recursive TypeSchema; register Threadable classes in types."""
+    """
+    Convert one Python type hint into a recursive `TypeSchema`.
+
+    Registers each `@Threadable` class in `types` so marshal can reconstruct
+    Python objects on unpack. Detects recursive Threadable graphs and marks
+    repeated nodes with `is_ref` so serialization and accessor emission stay
+    finite.
+
+    #### Args:
+    - hint: Any = annotated Python type from a kernel signature
+    - types: dict[str, type] = output map of Threadable name to Python class
+    - _completed: dict[str, TypeSchema] | None = layouts built so far in this walk
+    - _stack: frozenset[str] | None = Threadable names currently being expanded
+
+    #### Returns
+    - TypeSchema = layout for marshal and trampoline emission
+
+    #### Raises
+    - TypeError = hint is unsupported or invalid for kernel dispatch
+
+    #### Technical terms:
+    - TypeSchema: recursive compile-time layout (see module docstring).
+    - is_ref: marks a forward reference to a Threadable already on the stack.
+    """
     completed = _completed if _completed is not None else {}
     stack = _stack or frozenset()
     py_type = hint_to_pytype(hint)
@@ -279,7 +412,7 @@ def hint_to_schema(
         name = hint.__name__
         types[name] = hint
         if name in completed:
-            # Same layout object (shared) — emit as ref in to_dict via is_ref copy
+            # Reuse the layout object; mark as ref when still on the recursion stack.
             return TypeSchema(
                 "threadable",
                 name,
@@ -371,6 +504,19 @@ def _param_from_hint(
     types: dict[str, type],
     completed: dict[str, TypeSchema] | None = None,
 ) -> ParamMeta:
+    """
+    Build one `ParamMeta` from a parameter name and type hint.
+
+    #### Args:
+    - name: str = Python parameter name
+    - hint: Any = annotated type for the parameter
+    - pass_as: str = marshal and call binding mode for this parameter
+    - types: dict[str, type] = Threadable registry updated by `hint_to_schema`
+    - completed: dict[str, TypeSchema] | None = shared layout cache for recursion
+
+    #### Returns
+    - ParamMeta = parameter record attached to `KernelMeta.params`
+    """
     schema = hint_to_schema(hint, types, _completed=completed)
     return ParamMeta(name=name, pass_as=pass_as, schema=schema)
 
@@ -382,6 +528,30 @@ def build_kernel_meta(
     owner_name: str | None = None,
     owner_cls: type | None = None,
 ) -> KernelMeta:
+    """
+    Build and attach compile-time metadata for one `@Thread` kernel function.
+
+    Inspects annotations, chooses `pass_as` for each parameter, builds return
+    layout, stores the result in `KERNELS`, and sets `fn.__kernel_meta__` for
+    marshal and the native binder.
+
+    #### Args:
+    - fn: function = compiled kernel Python wrapper with type hints
+    - symbol: str = export prefix for generated C symbols
+    - owner_name: str | None = Threadable class name when `fn` is a method
+    - owner_cls: type | None = explicit Threadable class for method kernels
+
+    #### Returns
+    - KernelMeta = full metadata record for this kernel
+
+    #### Raises
+    - TypeError = missing annotations, unknown owner class, or bad types
+
+    #### Technical terms:
+    - pass_as: controls pack storage and how `emit_trampoline_cpp` calls the kernel.
+    - layouts: Threadable schemas collected in `completed` for accessor emission.
+    - symbol: becomes `{symbol}__call`, `{symbol}__args_new`, and accessor prefixes.
+    """
     hints = get_type_hints(fn)
     params: list[ParamMeta] = []
     types: dict[str, type] = {}
@@ -389,6 +559,7 @@ def build_kernel_meta(
 
     names = list(fn.__code__.co_varnames[: fn.__code__.co_argcount])
     if owner_name and names and names[0] == "self":
+        # Method kernels bind the Threadable instance as an opaque pointer parameter.
         cls = owner_cls
         if cls is None:
             from .frontend.Registry import REGISTRY
@@ -409,6 +580,7 @@ def build_kernel_meta(
             )
         hint = hints[name]
         py_type = hint_to_pytype(hint)
+        # pass_as tells marshal and the call trampoline how to store and bind the arg.
         if is_tbuffer_pytype(py_type):
             pass_as = "tbuffer"
         elif is_sync_pytype(py_type):
@@ -463,10 +635,11 @@ def build_kernel_meta(
     return meta
 
 
-# --- trampoline emission -------------------------------------------------
+# --- Trampoline emission: pack struct, accessors, and __call wrapper ---
 
 
 def _cpp_prim(kind: str) -> str:
+    """Alias for `_primitive_cpp`; used by accessor emission helpers."""
     return _primitive_cpp(kind)
 
 
@@ -474,14 +647,34 @@ def _emit_prim_accessors(
     lines: list[str],
     *,
     symbol: str,
-    struct: str, # unused
+    struct: str,  # Reserved; pack struct name is carried through other helpers.
     prefix: str,
     expr: str,
     kind: str,
     extra_params: str,
-    extra_args_use: str, # unused
+    extra_args_use: str,  # Reserved for future path suffix wiring.
 ) -> None:
-    """extra_params like ', size_t i0' or ', const char* k0'."""
+    """
+    Append C++ set/get trampoline accessors for one primitive pack field.
+
+    Emits `{symbol}__set_{prefix}` and `{symbol}__get_{prefix}` (plus length
+    helpers for strings). Nested list or dict slots add index and key parameters
+    through `extra_params`.
+
+    #### Args:
+    - lines: list[str] = output C++ source lines mutated in place
+    - symbol: str = kernel export prefix
+    - struct: str = pack struct name (unused here; kept for uniform call shape)
+    - prefix: str = field segment in accessor names (`a0`, `a0_x`, `ret`, ...)
+    - expr: str = C++ lvalue path into the pack (for example `a->a0.x`)
+    - kind: str = primitive kind
+    - extra_params: str = extra formal parameters (for example `, size_t i0`)
+    - extra_args_use: str = reserved; path args are already in `extra_params`
+
+    #### Technical terms:
+    - trampoline accessor: exported getter or setter called by marshal (see module docstring).
+    - prefix: parameter or nested field segment in generated symbol names.
+    """
     cpp_t = _cpp_prim(kind)
     if kind == "str":
         lines.append(
@@ -528,7 +721,33 @@ def _emit_schema_accessors_fixed(
     layouts: dict[str, TypeSchema],
     ancestors: frozenset[str] = frozenset(),
 ) -> None:
-    """Emit set/get accessors; skip Threadable fields that would recurse forever."""
+    """
+    Recursively emit trampoline accessors for one `TypeSchema` subtree.
+
+    Walks threadables, lists, dicts, tbuffers, and sync params and appends the
+    matching C++ getter and setter symbols to `lines`. Skips Threadable branches
+    that would recurse forever through `ancestors`.
+
+    #### Args:
+    - lines: list[str] = output C++ source lines mutated in place
+    - symbol: str = kernel export prefix
+    - struct: str = pack struct name (for example `move__args`)
+    - prefix: str = accessor field segment (`a0`, `a0_elem`, `ret`, ...)
+    - expr: str = C++ lvalue into the pack for this node
+    - schema: TypeSchema = layout node to emit accessors for
+    - index_params: list[str] = list index formal parameter names (`i0`, `i1`, ...)
+    - key_params: list[tuple[str, str]] = dict key formals as `(name, cpp_type)` pairs
+    - layouts: dict[str, TypeSchema] = full Threadable layouts for cycle-safe walks
+    - ancestors: frozenset[str] = Threadable type names already open on this path
+
+    #### Raises
+    - TypeError = schema kind cannot be emitted
+
+    #### Technical terms:
+    - trampoline accessor: generated C API marshal uses to read or write the pack.
+    - prefix: grows with nesting (`a0_x`, `a0_elem`, `a0_at`, `a0_ival`, ...).
+    - layouts: supplies full Threadable fields when `schema.is_ref` is set.
+    """
     extra = "".join(f", size_t {i}" for i in index_params)
     extra += "".join(f", {ty} {name}" for name, ty in key_params)
 
@@ -550,7 +769,7 @@ def _emit_schema_accessors_fixed(
         fields = layout.fields or schema.fields
         next_anc = ancestors | ({schema.type_name} if schema.type_name else set())
         for fname, fschema in fields:
-            # One level of self-ref containers is enough (e.g. Boid.flock elems).
+            # Skip list-of-self and direct self fields that would recurse accessors forever.
             if (
                 fschema.kind == "list"
                 and fschema.inner
@@ -579,6 +798,7 @@ def _emit_schema_accessors_fixed(
 
     if schema.kind == "list":
         assert schema.inner is not None
+        # List accessors: resize and size at this level, then emit element accessors.
         lines.append(
             f"CTHREADS_API void {symbol}__{prefix}_resize(void* p{extra}, size_t n) {{"
         )
@@ -610,6 +830,7 @@ def _emit_schema_accessors_fixed(
         key_cpp = "const char*" if key_kind == "str" else "int"
         key_name = f"k{len(key_params)}"
 
+        # Dict accessors: clear and size, then per-key insert or nested ensure_key path.
         lines.append(
             f"CTHREADS_API void {symbol}__{prefix}_clear(void* p{extra}) {{"
         )
@@ -659,6 +880,7 @@ def _emit_schema_accessors_fixed(
             )
 
         next_i = f"i{len(index_params)}"
+        # Unpack path: iterate native map by index and read key plus value accessors.
         unpack_indices = index_params + [next_i]
         unpack_extra = "".join(f", size_t {i}" for i in unpack_indices)
         unpack_extra += "".join(f", {ty} {name}" for name, ty in key_params)
@@ -702,6 +924,7 @@ def _emit_schema_accessors_fixed(
         return
 
     if schema.kind == "tbuffer":
+        # TBuffer params store a host pointer; marshal sets it through set_{prefix}_ptr.
         lines.append(
             f"CTHREADS_API void {symbol}__set_{prefix}_ptr(void* p{extra}, void* buf) {{"
         )
@@ -712,6 +935,7 @@ def _emit_schema_accessors_fixed(
         return
 
     if schema.kind == "sync":
+        # Sync params store a host Lock or Event pointer the same way as TBuffer.
         lines.append(
             f"CTHREADS_API void {symbol}__set_{prefix}_ptr(void* p{extra}, void* buf) {{"
         )
@@ -725,6 +949,25 @@ def _emit_schema_accessors_fixed(
 
 
 def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
+    """
+    Generate C++ pack struct, trampoline accessors, and `__call` for one kernel.
+
+    Produces the body appended to a kernel `.cpp` file: `{symbol}__args`, lifecycle
+    helpers, per-parameter accessors, optional shared promote/demote helpers, and
+    the call wrapper that invokes the real compiled kernel function.
+
+    #### Args:
+    - meta: KernelMeta = compile record from `build_kernel_meta`
+    - real_call: str = C++ name of the compiled kernel function to invoke
+
+    #### Returns
+    - str = C++ source fragment including required `#include` lines
+
+    #### Technical terms:
+    - pack: `{symbol}__args` struct emitted at the top of the fragment.
+    - trampoline accessor: set/get/resize symbols marshal calls at runtime.
+    - pass_as: controls pack member type, pointer storage, and `__call` arguments.
+    """
     lines: list[str] = []
     struct = f"{meta.symbol}__args"
     needs_cstring = False
@@ -734,6 +977,7 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
     lines.append(f"struct {struct} {{")
     lines.append("    cthreads::SharedHost* __shared_host = nullptr;")
     for i, p in enumerate(meta.params):
+        # TBuffer and sync params are pointer slots; everything else is stored by value.
         if p.schema.kind == "tbuffer" or p.schema.kind == "sync":
             lines.append(f"    {p.schema.cpp_type}* a{i};")
         else:
@@ -762,6 +1006,7 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
     lines.append("")
 
     def walk_needs(schema: TypeSchema | None) -> None:
+        """Track which standard headers accessor bodies will require."""
         nonlocal needs_cstring, needs_iterator
         if schema is None:
             return
@@ -797,6 +1042,7 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
         )
         lines.append("")
         if p.pass_as == "shared":
+            # Shared params: promote pack slot into SharedHost at spawn, demote before readback.
             lines.append(
                 f"CTHREADS_API void {meta.symbol}__promote_a{i}_shared("
                 f"void* p, cthreads::SharedHost* h) {{"
@@ -822,7 +1068,7 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
 
     if meta.return_schema is not None:
         walk_needs(meta.return_schema)
-        # returns only need getters; still emit full accessors (set unused)
+        # Return slot uses prefix `ret`; getters support unpack_return after the kernel runs.
         _emit_schema_accessors_fixed(
             lines,
             symbol=meta.symbol,
@@ -852,6 +1098,7 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
     call_args: list[str] = []
     for i, p in enumerate(meta.params):
         slot = f"a->a{i}"
+        # Map pass_as to the C++ expression passed into the real kernel call.
         if p.pass_as == "ptr":
             call_args.append(f"&{slot}")
         elif p.pass_as in ("tbuffer", "sync"):
@@ -895,6 +1142,19 @@ def emit_trampoline_cpp(meta: KernelMeta, real_call: str) -> str:
 
 
 def emit_trampoline_decls(meta: KernelMeta) -> str:
+    """
+    Emit header declarations for pack lifecycle and call trampolines.
+
+    Accessor declarations are omitted here; they are linked from the `.cpp`
+    translation unit. This list is the stable surface `module.cpp` relies on
+    for allocate, free, call, and SharedHost wiring.
+
+    #### Args:
+    - meta: KernelMeta = compile record from `build_kernel_meta`
+
+    #### Returns
+    - str = C declaration block for the kernel `.hpp` file
+    """
     lines = [
         f"CTHREADS_API void* {meta.args_new_symbol}();",
         f"CTHREADS_API void {meta.args_free_symbol}(void* p);",
@@ -905,7 +1165,14 @@ def emit_trampoline_decls(meta: KernelMeta) -> str:
 
 
 def collect_tbuffer_threadables() -> set[str]:
-    """Threadable type names used in ``TBuffer[Threadable]`` kernel params."""
+    """
+    Collect Threadable type names used as `TBuffer[Threadable]` kernel parameters.
+
+    Used when emitting the host-side TBuffer allocator runtime.
+
+    #### Returns
+    - set[str] = Threadable class names referenced by compiled kernels
+    """
     names: set[str] = set()
     for meta in KERNELS.values():
         for p in meta.params:
@@ -921,9 +1188,24 @@ def emit_tbuffer_runtime_files(
     thread_dir: Path,
 ) -> tuple[str, str]:
     """
-    Emit ``cthreads_tbuffer.{hpp,cpp}`` for opaque host allocation.
+    Emit `cthreads_tbuffer.hpp` and `cthreads_tbuffer.cpp` host allocator sources.
 
-    ``_ext`` passes ``void*``; kernels cast to ``tripple_buffer<T>&``.
+    The native extension passes opaque `void*` handles; kernels cast them to
+    `tripple_buffer<T>&`. One switch case is generated per Threadable name.
+
+    #### Args:
+    - threadable_names: set[str] = Threadable types referenced by kernel params
+    - thread_dir: Path = `__Thread__` output directory for include paths
+
+    #### Returns
+    - tuple[str, str] = `(hpp_source, cpp_source)` written by `write_tbuffer_runtime`
+
+    #### Raises
+    - RuntimeError = a named Threadable has no compiled ThreadableUnit
+
+    #### Technical terms:
+    - TBuffer: host-side triple buffer wrapper passed into kernels by pointer.
+    - tripple_buffer: C++ buffer type stored behind the opaque host pointer.
     """
     from .frontend.Registry import REGISTRY
 
@@ -1035,9 +1317,16 @@ def emit_tbuffer_runtime_files(
 
 def write_tbuffer_runtime(root: Path) -> bool:
     """
-    Write or remove ``__Thread__/cthreads_tbuffer.*`` for the project.
+    Write or remove `__Thread__/cthreads_tbuffer.*` for the current project.
 
-    Returns True if allocator sources exist after this call.
+    When no kernel uses `TBuffer[Threadable]`, existing allocator files are
+    deleted so stale symbols are not linked.
+
+    #### Args:
+    - root: Path = project root containing the `__Thread__` codegen folder
+
+    #### Returns
+    - bool = True when allocator sources exist after this call, else False
     """
     from .io import write_if_changed
 
@@ -1060,8 +1349,10 @@ def write_tbuffer_runtime(root: Path) -> bool:
     return True
 
 
-# Back-compat for tests that still import FieldMeta
+# Back-compat for tests that still import FieldMeta.
 @dataclass
 class FieldMeta:
+    """Legacy flat Threadable field descriptor (name and primitive kind only)."""
+
     name: str
     kind: str
