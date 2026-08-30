@@ -288,11 +288,28 @@ def test_pool_submit_shared_workers(shared_kernels):
     head = [0, 0, 0, 0]
     pool = ThreadPool(4).start()
     try:
-        jobs = [
-            pool.submit(shared_kernels.bump_at, head, i) for i in range(4)
-        ]
+        with pool.submit_queue():
+            jobs = [
+                pool.submit(shared_kernels.bump_at, head, i) for i in range(4)
+            ]
         for j in jobs:
             j.join()
+        assert head == [1, 1, 1, 1]
+    finally:
+        pool.stop()
+
+
+@_INTEGRATION
+def test_pool_group_shared_workers(shared_kernels):
+    from cthreads import ThreadPool
+
+    head = [0, 0, 0, 0]
+    pool = ThreadPool(4).start()
+    try:
+        group = pool.group(
+            shared_kernels.bump_at, [(head, i) for i in range(4)]
+        )
+        group.results()
         assert head == [1, 1, 1, 1]
     finally:
         pool.stop()

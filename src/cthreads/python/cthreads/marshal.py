@@ -47,7 +47,7 @@ and could deadlock the Windows loader when `LoadLibrary` was repeated.
 - prefix: field segment inside accessor names (`a0` for the first parameter,
   `ret` for the return value, `a0_elem` for a list element field).
 - trampoline accessor: C function emitted into the kernel DLL so Python can read
-  or write one pack field without entering the kernel body. [more here: docs\guide\marshal_and_module.md]
+  or write one pack field without entering the kernel body. [more here: docs/guide/marshal_and_module.md]
 - trampoline call: a single invocation of a trampoline accessor through `_call`.
 - native accessor API: the full set of trampolines for one field (set, get,
   resize, clear, insert, and similar operations).

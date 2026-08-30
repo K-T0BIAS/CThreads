@@ -154,14 +154,18 @@ def test_facade_group_emits_jobgroup(monkeypatch):
         def __init__(self, capacity: int, queue_limit: int = -1):
             self.capacity = capacity
             self.queue_limit = queue_limit
-            self._n = 0
+            self.submit_calls: list = []
 
         def start(self):
             return None
 
         def submit(self, fn, *args, **kwargs):
-            self._n += 1
-            return _RawJob(args[0] if args else self._n)
+            self.submit_calls.append(("single", fn, args, kwargs))
+            return _RawJob(args[0] if args else None)
+
+        def submit_many(self, jobs):
+            self.submit_calls.append(("batch", jobs))
+            return [_RawJob(spec[1]) for spec in jobs]
 
     monkeypatch.setattr(mod, "_NativeThreadPool", _RawPool)
     pool = mod.ThreadPool(2).start()
@@ -169,6 +173,63 @@ def test_facade_group_emits_jobgroup(monkeypatch):
     assert isinstance(group, JobGroup)
     assert len(group) == 3
     assert group.results() == [10, 20, 30]
+    assert len(pool._raw.submit_calls) == 1
+    assert pool._raw.submit_calls[0][0] == "batch"
+    specs = pool._raw.submit_calls[0][1]
+    assert len(specs) == 3
+    assert specs[0][1] == 10
+    assert specs[1][1] == 20
+    assert specs[2][1] == 30
+
+
+def test_facade_submit_queue_pins_and_unpins(monkeypatch):
+    import cthreads.pool.threadPool as mod
+
+    class _RawPool:
+        def __init__(self, capacity: int, queue_limit: int = -1):
+            self.capacity = capacity
+            self.queue_limit = queue_limit
+            self.pins = 0
+            self.events: list[str] = []
+
+        def pin_shared(self):
+            self.pins += 1
+            self.events.append("pin")
+
+        def unpin_shared(self):
+            self.pins -= 1
+            self.events.append("unpin")
+
+    monkeypatch.setattr(mod, "_NativeThreadPool", _RawPool)
+    pool = mod.ThreadPool(2)
+    with pool.submit_queue() as p:
+        assert p is pool
+        assert pool._raw.pins == 1
+    assert pool._raw.pins == 0
+    assert pool._raw.events == ["pin", "unpin"]
+
+
+def test_facade_submit_queue_unpins_on_error(monkeypatch):
+    import cthreads.pool.threadPool as mod
+
+    class _RawPool:
+        def __init__(self, capacity: int, queue_limit: int = -1):
+            self.capacity = capacity
+            self.queue_limit = queue_limit
+            self.pins = 0
+
+        def pin_shared(self):
+            self.pins += 1
+
+        def unpin_shared(self):
+            self.pins -= 1
+
+    monkeypatch.setattr(mod, "_NativeThreadPool", _RawPool)
+    pool = mod.ThreadPool(2)
+    with pytest.raises(RuntimeError, match="boom"):
+        with pool.submit_queue():
+            raise RuntimeError("boom")
+    assert pool._raw.pins == 0
 
 
 def test_facade_is_running_index(monkeypatch):
@@ -229,6 +290,19 @@ def test_native_start_stop_restart():
     pool.stop()
     pool.start()
     pool.stop()
+
+
+def test_native_pin_shared_balanced():
+    Native = _require_native_pool()
+    if not hasattr(Native, "pin_shared"):
+        pytest.skip("pin_shared missing — rebuild extension")
+    pool = Native(2)
+    pool.pin_shared()
+    pool.pin_shared()
+    pool.unpin_shared()
+    pool.unpin_shared()
+    with pytest.raises(Exception, match="unpin"):
+        pool.unpin_shared()
 
 
 def test_native_is_running_out_of_range():

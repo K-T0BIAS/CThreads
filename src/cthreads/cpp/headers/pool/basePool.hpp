@@ -54,7 +54,6 @@ namespace cthreads::pool {
             virtual void join() = 0;
             virtual void submit(std::function<void()> func) = 0;
 
-
             virtual bool is_running(int thread_id) const final {
                 return this->thread_status[thread_id].load();
             }

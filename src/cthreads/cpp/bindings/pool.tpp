@@ -102,5 +102,73 @@ inline void bind_pool_impl(py::module_& parent) {
             py::arg("fn"),
             "Pack a @Thread function and enqueue it. Returns a Job that is "
             "already queued (start() is a no-op; await/join/result work as usual)."
+        )
+        .def(
+            "submit_many",
+            [](cthreads::pool::ThreadPool& self,
+               py::list jobs) -> std::vector<std::shared_ptr<SpawnedKernel>> {
+                // Each element is a sequence (fn, *args). Pin covers slots created
+                // during this wave so early finishes cannot free SharedHost mid-loop.
+                cthreads::SharedHost* host = self.shared_host_ptr();
+                host->pin();
+                std::vector<std::shared_ptr<SpawnedKernel>> spawned_kernels;
+                try {
+                    for (py::handle item : jobs) {
+                        py::sequence seq = py::reinterpret_borrow<py::sequence>(item);
+                        if (seq.size() < 1) {
+                            throw py::type_error(
+                                "cthreads.pool.ThreadPool.submit: each job must be "
+                                "(fn, *args)"
+                            );
+                        }
+                        py::object fn = seq[0];
+                        if (!py::hasattr(fn, "__threaded") ||
+                            !fn.attr("__threaded").cast<bool>()) {
+                            throw py::type_error(
+                                "cthreads.pool.ThreadPool.submit: expected a @Thread function"
+                            );
+                        }
+                        if (!py::hasattr(fn, "__kernel_meta__")) {
+                            throw std::runtime_error(
+                                "cthreads.pool.ThreadPool.submit: missing __kernel_meta__ — "
+                                "call cthreads.compile() first"
+                            );
+                        }
+                        py::tuple pos_args(seq.size() - 1);
+                        for (size_t j = 1; j < static_cast<size_t>(seq.size()); ++j) {
+                            pos_args[j - 1] = seq[j];
+                        }
+                        py::dict meta = fn.attr("__kernel_meta__").cast<py::dict>();
+                        py::list ordered = bind_args(
+                            meta, py::args(pos_args), py::kwargs()
+                        );
+                        spawned_kernels.push_back(
+                            spawn_from_meta(meta, ordered, &self)
+                        );
+                    }
+                } catch (...) {
+                    host->unpin();
+                    throw;
+                }
+                host->unpin();
+                return spawned_kernels;
+            },
+            py::arg("jobs"),
+            "Pack a list of (fn, *args) jobs under one SharedHost pin and enqueue "
+            "them. Returns Jobs that are already queued."
+        )
+        .def(
+            "pin_shared",
+            [](cthreads::pool::ThreadPool& self) {
+                self.shared_host_ptr()->pin();
+            },
+            "Pin this pool's SharedHost for a submit wave (pair with unpin_shared)."
+        )
+        .def(
+            "unpin_shared",
+            [](cthreads::pool::ThreadPool& self) {
+                self.shared_host_ptr()->unpin();
+            },
+            "Release a SharedHost pin taken by pin_shared."
         );
 }
