@@ -10,4 +10,5 @@
 | Guide to the internal **`linalg`** and **`math`** modules for high performance math tasks. Includes: `tensor (cthreads.Array)`, `cmath` and `python stdlib math` | [link](./guide/math_and_linalg.md) |
 | How to use `cthreads.Job` for custom thread handling and `async` applications | [link](./guide/jobs.md) |
 | `cthreads documentation` | [link](./COMPILER.md) |
+| **Release**: GitHub Actions, TestPyPI, PyPI trusted publishing | [link](./release.md) |
 | ***TODO ADD LINKS TO IMPLEMENATTION EXAMPLES* | link |

@@ -13,6 +13,7 @@ Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist c
 
 - [Install](./docs/install.md)
 - [Guides](./docs/index.md)
+- [Release (GitHub / PyPI)](./docs/release.md)
 - [Math & linalg](./docs/guide/math_and_linalg.md)
 - [Compiler notes](./docs/COMPILER.md)
 - [Sync / state writeback](./docs/sync_state_docs.md)

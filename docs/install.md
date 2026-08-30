@@ -130,6 +130,11 @@ Calling `thread(..., force=True)` while kernels are still loaded raises. Unload 
 | `Python.h` / Development.Module missing (Linux) | Install `python3-dev` (or `python3.12-dev` matching the venv interpreter). |
 | `thread(force=True)` errors about loaded kernels | `unload_kernels()` first, then force-rebuild. |
 | Editable import finds Python but not `_ext` | Re-run `pip install -e .` with the venv active so the post-build copy lands beside `cthreads/`. |
+| `LoadLibrary` error **4551** on Windows | Smart App Control blocking the unsigned `cthreads_kernels.dll` compiled in your project. Turn SAC off or use WSL/Linux. See [release.md](./release.md). |
+
+## Publishing to PyPI
+
+Wheels and the sdist are built on GitHub Actions. You do not need a Linux desktop. Walkthrough: [release.md](./release.md).
 
 ## Next
 
