@@ -116,18 +116,36 @@ def test_demote_shared_noop_when_host_null():
 
 
 def test_writeback_job_state_demotes_then_writebacks(monkeypatch):
-    calls: list[str] = []
+    captured: list[str] = []
+    head = [1, 2]
 
-    def fake_demote(symbol, params, pack_ptr, host_ptr, meta=None):
-        calls.append("demote")
-        assert host_ptr == 0xBEEF
+    class FakeFn:
+        pass
 
-    def fake_writeback(symbol, params, values, pack_ptr, types=None, schemas=None):
-        calls.append("writeback")
-        assert pack_ptr == 0x1000
+    demote0 = FakeFn()
+    demote_ret = FakeFn()
 
-    monkeypatch.setattr(marshal, "demote_shared_from_host", fake_demote)
-    monkeypatch.setattr(marshal, "writeback_params", fake_writeback)
+    def fake_fn(_lib, name):
+        captured.append(name)
+        if name == "step__demote_a0_shared":
+            return demote0
+        if name == "step__demote_return_shared":
+            return demote_ret
+        raise AssertionError(name)
+
+    def fake_call(fn, restype, argtypes, *args):
+        captured.append("call")
+        assert fn in (demote0, demote_ret)
+
+    def fake_unpack(lib, symbol, prefix, schema, path, pack, **kw):
+        captured.append(f"unpack:{prefix}")
+        assert kw.get("into") is head
+
+    monkeypatch.setattr(marshal, "_lib", lambda: object())
+    monkeypatch.setattr(marshal, "_pack_c", lambda p: ctypes.c_void_p(p))
+    monkeypatch.setattr(marshal, "_fn", fake_fn)
+    monkeypatch.setattr(marshal, "_call", fake_call)
+    monkeypatch.setattr(marshal, "unpack_value", fake_unpack)
 
     marshal.writeback_job_state(
         "step",
@@ -138,12 +156,83 @@ def test_writeback_job_state_demotes_then_writebacks(monkeypatch):
                 "schema": {"kind": "list", "inner": {"kind": "int"}},
             }
         ],
-        [[1, 2]],
+        [head],
         0x1000,
         0xBEEF,
         meta={"return_pass_as": "shared", "symbol": "step", "params": []},
     )
-    assert calls == ["demote", "writeback"]
+    assert captured == [
+        "step__demote_a0_shared",
+        "call",
+        "unpack:a0",
+        "step__demote_return_shared",
+        "call",
+    ]
+    assert marshal._wb_table == {}
+
+
+def test_writeback_job_state_uses_original_param_index(monkeypatch):
+    captured: list[str] = []
+    head = [0, 0]
+
+    def fake_fn(_lib, name):
+        captured.append(name)
+        return object()
+
+    def fake_unpack(lib, symbol, prefix, schema, path, pack, **kw):
+        captured.append(f"unpack:{prefix}")
+
+    monkeypatch.setattr(marshal, "_lib", lambda: object())
+    monkeypatch.setattr(marshal, "_pack_c", lambda p: ctypes.c_void_p(p))
+    monkeypatch.setattr(marshal, "_fn", fake_fn)
+    monkeypatch.setattr(marshal, "_call", lambda *a, **k: None)
+    monkeypatch.setattr(marshal, "unpack_value", fake_unpack)
+
+    marshal.writeback_job_state(
+        "step",
+        [
+            {"name": "n", "pass_as": "value", "schema": {"kind": "int"}},
+            {
+                "name": "head",
+                "pass_as": "shared",
+                "schema": {"kind": "list", "inner": {"kind": "int"}},
+            },
+        ],
+        [3, head],
+        0x1000,
+        0xBEEF,
+    )
+    assert captured == ["step__demote_a1_shared", "unpack:a1"]
+
+
+def test_writeback_job_state_skips_scalars_and_threadable_dicts(monkeypatch):
+    monkeypatch.setattr(marshal, "_lib", lambda: object())
+    monkeypatch.setattr(marshal, "_pack_c", lambda p: ctypes.c_void_p(p))
+    monkeypatch.setattr(
+        marshal,
+        "_fn",
+        lambda *a, **k: pytest.fail("demote should not run"),
+    )
+    monkeypatch.setattr(
+        marshal,
+        "unpack_value",
+        lambda *a, **k: pytest.fail("unpack should not run"),
+    )
+
+    marshal.writeback_job_state(
+        "step",
+        [
+            {"name": "n", "pass_as": "value", "schema": {"kind": "int"}},
+            {
+                "name": "c",
+                "pass_as": "ref",
+                "schema": {"kind": "threadable", "type_name": "Counter"},
+            },
+        ],
+        [1, {"n": 0}],
+        0x1000,
+        0,
+    )
 
 
 def test_unpack_return_demotes_shared_return_before_read(monkeypatch):

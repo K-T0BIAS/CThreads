@@ -16,10 +16,11 @@ pack slot into the cooperative `SharedHost` heap before the worker runs.
 
 After the kernel mutates native memory, `writeback_job_state` pulls mutable
 reference arguments back into the same Python objects the caller passed in.
-It first runs `demote_shared_from_host` for any `Shared[T]` parameters (and
-returns), then `writeback_params` for `Threadable`, `list`, and `dict`
-arguments. `unpack_return` reads the `ret` field from the pack (or shared
-host) and builds the Python return value.
+For each live `Threadable`, `list`, or `dict` argument it takes a per-object
+row lock, demotes that `Shared[T]` slot if needed, then unpacks into the
+caller object. A shared return is demoted once after those arguments.
+`unpack_return` reads the `ret` field from the pack (or shared host) and
+builds the Python return value.
 
 Parameters and returns use the same recursive pack/unpack logic, so scalars,
 `Threadable` instances, nested structures, `list[T]`, and `dict[str|int, T]`
@@ -29,7 +30,8 @@ only reference-like types are written back.
 Every public entry point takes an explicit pack pointer (and optionally a
 `SharedHost` pointer). Marshal does not keep a process-global pack slot, so
 concurrent jobs can pack, write back, and unpack in parallel while ctypes
-releases the Global Interpreter Lock (GIL).
+releases the Global Interpreter Lock (GIL). Writeback of the same Python
+object is serialized by `_wb_table` so `clear` and `append` cannot overlap.
 
 The kernel dynamic-link library (DLL) is loaded once per kernel path and
 cached as a `CDLL` handle. Each native call goes through `_call`, which binds
@@ -97,6 +99,10 @@ _lib_lock = threading.Lock()  # Only one thread may load or refresh the cached k
 _cached_lib: ctypes.CDLL | None = None
 _cached_path: str | None = None
 
+# Per Python object identity: [row lock, waiter count]. Created on first
+# writeback of that object and deleted when the last waiter leaves.
+_wb_table: dict[int, list] = {}
+_wb_table_mu = threading.Lock()
 
 def _lib() -> ctypes.CDLL | None:
     """
@@ -1075,8 +1081,11 @@ def writeback_job_state(
     Sync shared host memory and mirror mutable reference arguments into Python.
 
     This is the main post-kernel and mid-run sync entry point called from
-    `module.cpp`. It demotes shared slots, then writebacks Threadables, lists,
-    and dicts into the original caller objects.
+    `module.cpp`. Each live list, dict, or Threadable is handled on its own:
+    a per-object row lock is taken, that parameter's Shared slot is demoted
+    if needed, then the pack is unpacked into the caller's object. Scalars
+    and other non-mutable kinds are skipped. A shared return is demoted once
+    after the argument loop.
 
     #### Args:
     - symbol: str = compiled kernel export prefix
@@ -1091,11 +1100,93 @@ def writeback_job_state(
     #### Technical terms:
     - writeback: mirror native pack fields into the caller's Python objects.
     - demote: refresh staged pack slots from SharedHost before writeback.
+    - row lock: per-object mutex in `_wb_table` so two jobs cannot rebuild
+      the same Python list or dict at once.
     - kernel meta: compile output passed from `module.cpp`.
     """
     meta = meta or {}
-    demote_shared_from_host(symbol, params, pack_ptr, host_ptr, meta)
-    writeback_params(symbol, params, values, pack_ptr, types, schemas)
+    types = types or {}
+    schemas = schemas or {}
+    # Resolve the kernel library and pack pointer once; every demote and unpack
+    # in this job uses the same pack.
+    lib = _lib()
+    pack = _pack_c(pack_ptr)
+
+    for i, (param, value) in enumerate(zip(params, values)):
+        schema = param.get("schema") or _legacy_schema(param)
+        # Scalars, sync primitives, and tensor buffers were copied by value or
+        # are not Python objects we mutate in place, so they need no lock.
+        if schema["kind"] not in ("threadable", "list", "dict"):
+            continue
+        # A plain dict stand-in is not the live Threadable the caller owns, so
+        # unpacking into it would write a throwaway object.
+        if isinstance(value, dict) and schema["kind"] == "threadable":
+            continue
+
+        # Key the table by object identity so two jobs sharing `head` wait on
+        # one lock, while two jobs with different lists can overlap.
+        value_id: int = id(value)
+        with _wb_table_mu:
+            row = _wb_table.get(value_id)
+            if row is None:
+                # First writeback of this object: create the row lock and a
+                # waiter count of zero before we increment it below.
+                row = [threading.Lock(), 0]
+                _wb_table[value_id] = row
+            # Count this job as a waiter so the row is not deleted while we
+            # block on `row_lock.acquire()` or while unpack is running.
+            row[1] += 1
+            row_lock: threading.Lock = row[0]
+
+        try:
+            # Take the row lock outside the table mutex so other objects can
+            # still create or join their own rows while we wait.
+            row_lock.acquire()
+            try:
+                # Demote this slot only, using the real parameter index `i` so
+                # a Shared list in `a1` does not hit `a0`. Do not pass `meta`
+                # here: that would also demote the return on every argument.
+                if param.get("pass_as") == "shared" and host_ptr:
+                    host = _pack_c(host_ptr)
+                    demote_fn = _fn(lib, f"{symbol}__demote_a{i}_shared")
+                    _call(
+                        demote_fn,
+                        None,
+                        [ctypes.c_void_p, ctypes.c_void_p],
+                        pack,
+                        host,
+                    )
+                # Unpack while the row lock is still held so another job cannot
+                # `clear`/`append` the same Python object mid-rebuild. ctypes
+                # may drop the GIL inside `_call`; the row lock still serializes.
+                unpack_value(
+                    lib,
+                    symbol,
+                    f"a{i}",
+                    schema,
+                    _Path(),
+                    pack,
+                    types=types,
+                    schemas=schemas,
+                    into=value,
+                )
+            finally:
+                row_lock.release()
+        finally:
+            # Drop our waiter even if demote or unpack raised, then delete the
+            # row when nobody is left so `id` reuse cannot join a stale lock.
+            with _wb_table_mu:
+                row = _wb_table[value_id]
+                row[1] -= 1
+                if row[1] == 0:
+                    del _wb_table[value_id]
+
+    # Shared returns live in SharedHost, not in a caller argument, so they are
+    # demoted once after the per-object loop and need no table row.
+    if host_ptr and meta.get("return_pass_as") == "shared":
+        host = _pack_c(host_ptr)
+        ret_fn = _fn(lib, f"{symbol}__demote_return_shared")
+        _call(ret_fn, None, [ctypes.c_void_p, ctypes.c_void_p], pack, host)
 
 
 def writeback_params(
