@@ -43,6 +43,7 @@ _GITIGNORE_PATTERNS = (
     ".cthreads_cache.json",
     "cthreads_kernels.dll",
     "cthreads_kernels.so",
+    "cthreads_kernels.lib",
     "libcthreads_kernels.so",
     "libcthreads_kernels.dylib",
 )
