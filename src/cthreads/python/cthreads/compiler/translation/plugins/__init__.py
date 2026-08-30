@@ -77,5 +77,6 @@ from . import shared as _shared  # noqa: E402, F401
 from . import cthreads_math as _cthreads_math  # noqa: E402, F401
 from . import sync as _sync  # noqa: E402, F401
 from . import linalg as _linalg  # noqa: E402, F401
+from . import free_fn as _free_fn  # noqa: E402, F401
 from . import fields as _fields  # noqa: E402, F401  # last AttrPlugin
 

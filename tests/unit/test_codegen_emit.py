@@ -105,6 +105,29 @@ def test_compile_free_thread_calls_threadable_method(tmp_module):
     assert ".step(dt)" in cpp
 
 
+def test_compile_free_thread_calls_other_free_thread(tmp_module):
+    mod = tmp_module(
+        """
+        from cthreads import Thread
+
+        @Thread
+        def helper(x: int) -> int:
+            return x + 1
+
+        @Thread
+        def main(x: int) -> int:
+            return helper(x)
+        """
+    )
+    info = compile(force=True)
+    assert "main" in info["rewritten"]
+    cpp = (Path(mod.__file__).parent / "__Thread__" / "main.cpp").read_text(
+        encoding="utf-8"
+    )
+    assert "helper(x)" in cpp
+    assert '#include "helper.hpp"' in cpp
+
+
 def test_source_fingerprint_used_in_cache(tmp_module):
     mod = tmp_module(
         """

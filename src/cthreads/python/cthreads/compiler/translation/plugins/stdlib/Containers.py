@@ -1,5 +1,5 @@
 """
-Python container builtins / methods → STL.
+Python container builtins / methods -> STL.
 
 - `len(xs)` -> `(xs).size()` (TBuffer -> `(xs).capacity()`)
 - list: append/clear/pop/insert/extend
