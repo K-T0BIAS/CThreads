@@ -69,11 +69,15 @@ namespace cthreads::pool {
                 this->cv.notify_all(); // notify all waiting worker threads that the pool is stopping
                 this->join(); // wait for in-flight tasks; queued tasks are dropped below
                 this->threads.clear();
+                // Destroy dropped tasks outside the queue mutex: their destructors may
+                // acquire the GIL, and Python code can wait on this mutex while holding it.
+                std::queue<std::function<void()>> dropped;
                 {
                     std::lock_guard<std::mutex> lock(this->tasks_queue_mutex);
-                    while (!this->tasks_queue.empty()) {
-                        this->tasks_queue.pop();
-                    }
+                    dropped.swap(this->tasks_queue);
+                }
+                while (!dropped.empty()) {
+                    dropped.pop();
                 }
                 this->started = false;
                 this->stop_signal.store(false);

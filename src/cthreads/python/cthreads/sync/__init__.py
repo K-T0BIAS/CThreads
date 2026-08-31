@@ -29,11 +29,13 @@ if _native is not None:
     Lock = _native.Lock
     Event = _native.Event
     RWLock = getattr(_native, "RWLock", None)
+    Barrier = getattr(_native, "Barrier", None)
     TBufferI64 = getattr(_native, "TBufferI64", None)
 else:
     Lock = None  # type: ignore[assignment,misc]
     Event = None  # type: ignore[assignment,misc]
     RWLock = None  # type: ignore[assignment,misc]
+    Barrier = None  # type: ignore[assignment,misc]
     TBufferI64 = None  # type: ignore[assignment,misc]
 
 __all__ = [
@@ -48,5 +50,6 @@ __all__ = [
     "Lock",
     "Event",
     "RWLock",
+    "Barrier",
     "TBufferI64",
 ]

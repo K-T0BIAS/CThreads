@@ -45,6 +45,10 @@ class SyncMethodPlugin(MethodTablePlugin):
             "release_write": method_op("release_write", 0),
             "try_acquire_write": method_op("try_acquire_write", 0),
         },
+        "Barrier": {
+            "arrive_and_wait": method_op("arrive_and_wait", 0),
+            "parties": method_op("parties", 0),
+        },
     }
 
     def type_key(self, py_type: PyType) -> str | None:

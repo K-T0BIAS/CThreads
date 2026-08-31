@@ -1,6 +1,6 @@
 # Native types shipped in the pybind module (not codegen'd as Threadables).
 # keyed by Python class __name__ as exposed on cthreads.sync / cthreads.linalg
-SYNC_INTERNAL_NAMES: frozenset[str] = frozenset({"Lock", "Event", "RWLock"})
+SYNC_INTERNAL_NAMES: frozenset[str] = frozenset({"Lock", "Event", "RWLock", "Barrier"})
 
 CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
     "Lock": {
@@ -14,6 +14,10 @@ CTHREADS_INTERNAL_TYPES: dict[str, dict[str, str]] = {
     "RWLock": {
         "cpp_name": "cthreads::sync::RWLock",
         "cpp_include": "sync/pyRWLock.hpp",
+    },
+    "Barrier": {
+        "cpp_name": "cthreads::sync::Barrier",
+        "cpp_include": "sync/pyBarrier.hpp",
     },
     # Fixed-capacity triple buffers (cthreads.sync.TBuffer*).
     "TBufferF64": {

@@ -10,6 +10,7 @@
 #include "../headers/math/clamps.hpp"
 #include "../headers/math/random.hpp"
 #include "../headers/pyThread.hpp"
+#include "../headers/sync/pyBarrier.hpp"
 #include "../headers/sync/pyEvent.hpp"
 #include "../headers/sync/pyLock.hpp"
 #include "../headers/sync/pyRWLock.hpp"
@@ -675,16 +676,28 @@ std::shared_ptr<SpawnedKernel> spawn_from_meta(
     auto job = make_kernel_job(self, call_fn, params_keep);
     if (pool) {
         // Keep SpawnedKernel alive until the task runs or is dropped from the queue.
+        // Python-owned handles in `job` / `spawned` must only be destroyed while the
+        // GIL is held (pool workers are bare OS threads).
         struct PoolTaskState {
             std::shared_ptr<SpawnedKernel> spawned;
             std::function<void()> job;
             std::atomic<bool> started{false};
+
+            void release_python_state() {
+                py::gil_scoped_acquire gil;
+                job = nullptr;
+                spawned.reset();
+            }
+
             ~PoolTaskState() {
+                py::gil_scoped_acquire gil;
                 if (!started.load(std::memory_order_acquire) && spawned) {
                     spawned->mark_done(std::make_exception_ptr(std::runtime_error(
                         "cthreads.pool: job dropped (pool stopped before run)"
                     )));
                 }
+                job = nullptr;
+                spawned.reset();
             }
         };
         auto st = std::make_shared<PoolTaskState>();
@@ -699,6 +712,7 @@ std::shared_ptr<SpawnedKernel> spawn_from_meta(
             } catch (...) {
                 st->spawned->mark_done(std::current_exception());
             }
+            st->release_python_state();
         });
     } else {
         // Dedicated path (unchanged): one OS thread via CThread.
@@ -837,8 +851,11 @@ std::uintptr_t sync_native_ptr(py::object obj) {
     if (py::isinstance<cthreads::sync::RWLock>(obj)) {
         return reinterpret_cast<std::uintptr_t>(&obj.cast<cthreads::sync::RWLock&>());
     }
+    if (py::isinstance<cthreads::sync::Barrier>(obj)) {
+        return reinterpret_cast<std::uintptr_t>(&obj.cast<cthreads::sync::Barrier&>());
+    }
     throw std::runtime_error(
-        "cthreads.sync_native_ptr: expected Lock, Event, or RWLock");
+        "cthreads.sync_native_ptr: expected Lock, Event, RWLock, or Barrier");
 }
 
 #include "pool.tpp"
@@ -877,7 +894,7 @@ PYBIND11_MODULE(_ext, m) {
         "sync_native_ptr",
         &sync_native_ptr,
         py::arg("obj"),
-        "Return the native address of a cthreads.sync Lock/Event/RWLock "
+        "Return the native address of a cthreads.sync Lock/Event/RWLock/Barrier "
         "for kernel marshalling."
     );
 
@@ -994,6 +1011,14 @@ PYBIND11_MODULE(_ext, m) {
              py::call_guard<py::gil_scoped_release>());
 
     rwlock.attr("__cthreads_internal__") = true;
+
+    auto barrier = py::class_<cthreads::sync::Barrier>(sync, "Barrier")
+        .def(py::init<std::size_t>(), py::arg("parties"))
+        .def("parties", &cthreads::sync::Barrier::parties)
+        .def("arrive_and_wait", &cthreads::sync::Barrier::arrive_and_wait,
+             py::call_guard<py::gil_scoped_release>());
+
+    barrier.attr("__cthreads_internal__") = true;
 
     // Fixed-capacity triple buffers (baseline bindings for primitive/container types).
     // Thread-side writes are typically codegen'd as: buf[i].field = ... (for Threadables)

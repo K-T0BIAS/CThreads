@@ -64,7 +64,7 @@ def is_tbuffer_pytype(py_type: PyType) -> bool:
 
 
 def is_sync_pytype(py_type: PyType) -> bool:
-    """True for `Lock` / `Event` / `RWLock` kernel params (non-copyable)."""
+    """True for `Lock` / `Event` / `RWLock` / `Barrier` kernel params (non-copyable)."""
     return (
         isinstance(py_type, PyCThreadsInternalType)
         and py_type.name in SYNC_INTERNAL_NAMES
