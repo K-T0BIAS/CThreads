@@ -1,9 +1,9 @@
 """
-cthreads.sync — host sync / TBuffer API.
+cthreads.sync - host sync / TBuffer API.
 
-- Annotation: ``TBuffer[...]`` (from types)
-- Host alloc: ``create_tbuffer`` / ``TBufferHandle`` / …
-- Native locks/events: re-exported from ``cthreads._ext.sync`` when present
+- Annotation: `TBuffer[...]` (from types)
+- Host alloc: `create_tbuffer` / `TBufferHandle` / …
+- Native locks/events: re-exported from `cthreads._ext.sync` when present
 """
 
 from __future__ import annotations

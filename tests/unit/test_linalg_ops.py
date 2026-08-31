@@ -170,7 +170,7 @@ def test_attribute_receiver_uses_threadable_field():
     )
     with registered_threadable(Body):
         ctx = _linalg_ctx(self=PyThreadable("Body"))
-        # owner unit is required for `self` → this-> lowering
+        # owner unit is required for `self` -> this-> lowering
         from cthreads.frontend.Registry import REGISTRY
 
         ctx.owner = REGISTRY.threadable_units["Body"]

@@ -3,7 +3,7 @@ cthreads.sync method / barrier lowering.
 
 - Lock / Event / RWLock methods on typed receivers (MethodTablePlugin)
 - TBuffer* / TBuffer[T] methods
-- ``__sync_state()`` kernel barrier
+- `__sync_state()` kernel barrier
 """
 
 from __future__ import annotations

@@ -636,7 +636,7 @@ T Array<T>::_fast_inner_product(const Array& lhs, const Array& rhs) {
 
 #ifdef __AVX2__
     if constexpr (std::is_same_v<T, float>) {
-        // AVX2 float: both vectors contiguous — loadu + fmadd along the length
+        // AVX2 float: both vectors contiguous - loadu + fmadd along the length
         __m256 acc = _mm256_setzero_ps(); // initialize accumulator to zero (float32)
         size_t i = 0;
         for (; i + 8 <= n; i += 8) { // itter over 8 elements at a time
@@ -656,7 +656,7 @@ T Array<T>::_fast_inner_product(const Array& lhs, const Array& rhs) {
         }
         return sum;
     } else if constexpr (std::is_same_v<T, double>) {
-        // AVX2 double: both vectors contiguous — loadu + fmadd along the length
+        // AVX2 double: both vectors contiguous - loadu + fmadd along the length
         __m256d acc = _mm256_setzero_pd(); // initialize accumulator to zero (float64)
         size_t i = 0;
         for (; i + 4 <= n; i += 4) { // itter over 4 elements at a time
@@ -815,7 +815,7 @@ constexpr size_t kGemmNrF32 = 16;
 constexpr size_t kGemmNrF64 = 8;
 
 // C[4 x 16] += A_pack[4 x kc] @ B_pack[kc x nc] at column offset jj (nr=16).
-// first_k: beta=0 (zero acc) — out is freshly allocated zeros on the first Kc panel.
+// first_k: beta=0 (zero acc) - out is freshly allocated zeros on the first Kc panel.
 void gemm_kernel_f32_4x16(
     float* c,
     size_t ldc,

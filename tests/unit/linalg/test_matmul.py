@@ -83,7 +83,7 @@ def test_strided_matmul_matches_contiguous(Array):
     a, da = filled(Array, [3, 2], start=1)
     b, db = filled(Array, [4, 2], start=3)
     at = a.transpose()  # 2x3
-    bt = b.transpose()  # 2x4  wait b is 4x2, T is 2x4 — need (2x3) @ (3x4)
+    bt = b.transpose()  # 2x4  wait b is 4x2, T is 2x4 - need (2x3) @ (3x4)
     # Build B as 3x4 then transpose to 4x3 for a strided RHS of 3x4? 
     rhs, dr = filled(Array, [4, 3], start=3)
     rt = rhs.transpose()  # 3x4 strided

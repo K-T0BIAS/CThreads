@@ -1,7 +1,7 @@
 """
-Runtime tests for ``cthreads.math`` pybind bindings.
+Runtime tests for `cthreads.math` pybind bindings.
 
-Skipped when ``_ext`` cannot load (e.g. Windows policy blocking a fresh DLL).
+Skipped when `_ext` cannot load (e.g. Windows policy blocking a fresh DLL).
 
 Usage pattern (same as sync)::
 

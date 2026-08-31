@@ -1,4 +1,4 @@
-"""``Shared[list|dict]`` method lowering (reuses container STL tables)."""
+"""`Shared[list|dict]` method lowering (reuses container STL tables)."""
 
 from __future__ import annotations
 

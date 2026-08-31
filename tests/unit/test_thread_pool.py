@@ -1,4 +1,4 @@
-"""Extensive unit tests for ``cthreads.ThreadPool`` / ``cthreads.pool``."""
+"""Extensive unit tests for `cthreads.ThreadPool` / `cthreads.pool`."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from helpers import prepare_and_load_or_skip, skip_if_kernel_runtime_error
 
 
 # ---------------------------------------------------------------------------
-# Package / facade (mocked native — no kernels)
+# Package / facade (mocked native - no kernels)
 # ---------------------------------------------------------------------------
 
 
@@ -257,7 +257,7 @@ def test_facade_is_running_index(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Native pool lifecycle (cthreads._ext.pool) — no kernel compile
+# Native pool lifecycle (cthreads._ext.pool) - no kernel compile
 # ---------------------------------------------------------------------------
 
 
@@ -268,7 +268,7 @@ def _require_native_pool():
         pytest.skip(f"cthreads._ext unavailable: {e}")
     pool_mod = getattr(_ext, "pool", None)
     if pool_mod is None or not hasattr(pool_mod, "ThreadPool"):
-        pytest.skip("cthreads._ext.pool.ThreadPool missing — rebuild extension")
+        pytest.skip("cthreads._ext.pool.ThreadPool missing - rebuild extension")
     return pool_mod.ThreadPool
 
 
@@ -295,7 +295,7 @@ def test_native_start_stop_restart():
 def test_native_pin_shared_balanced():
     Native = _require_native_pool()
     if not hasattr(Native, "pin_shared"):
-        pytest.skip("pin_shared missing — rebuild extension")
+        pytest.skip("pin_shared missing - rebuild extension")
     pool = Native(2)
     pool.pin_shared()
     pool.pin_shared()
@@ -383,7 +383,7 @@ def test_facade_submit_before_start_and_rejects_plain_fn(tmp_module):
         """,
         name="ct_pool_before_start",
     )
-    # Not started and/or kernels not prepared — must not silently enqueue.
+    # Not started and/or kernels not prepared - must not silently enqueue.
     with pytest.raises(Exception):
         pool.submit(mod.add, 1, 2)
 
@@ -631,7 +631,7 @@ def test_pool_submit_missing_meta_without_compile(tmp_module):
         """,
         name="ct_pool_orphan",
     )
-    # Decorated but never prepare/compile → no usable trampoline / meta load.
+    # Decorated but never prepare/compile -> no usable trampoline / meta load.
     pool = ThreadPool(1).start()
     try:
         with pytest.raises(Exception):
@@ -662,7 +662,7 @@ def test_pool_stop_drops_queued_jobs(pool_kernels):
         assert not blocker.done()
 
         queued = [pool.submit(pool_kernels.add, i, 1) for i in range(8)]
-        assert not blocker.done(), "blocker finished before stop — increase busy_n"
+        assert not blocker.done(), "blocker finished before stop - increase busy_n"
         pool.stop()
 
         blocker.join()
@@ -706,7 +706,7 @@ def test_pool_restart_does_not_rerun_old_queue(pool_kernels):
         assert not busy_job.done()
 
         abandoned = [pool.submit(pool_kernels.add, 100, i) for i in range(4)]
-        assert not busy_job.done(), "busy finished before stop — increase busy_n"
+        assert not busy_job.done(), "busy finished before stop - increase busy_n"
         pool.stop()
 
         busy_job.join()

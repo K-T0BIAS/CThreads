@@ -1,6 +1,8 @@
 # Releasing cthreads
 
-Releases are built on **GitHub Actions**, not on your PC. Linux wheels are produced on Ubuntu runners. You only click Publish (and optionally approve the `pypi` environment).
+This is a guide for the release pipeline. For more info or release rights contact [K-T0BIAS](https://github.com/K-T0BIAS)
+
+Releases are built on **GitHub Actions**, not on your PC. Linux wheels are produced on Ubuntu runners. You only click Publish (and approve the `pypi` environment).
 
 PyPI upload is **not** tied to merges into `main`. Broken PRs cannot publish.
 
@@ -18,7 +20,7 @@ macOS wheels are skipped for now (CMake enables AVX2 on non-MSVC; Apple Silicon 
 
 ### 1. GitHub environments
 
-In the repo: **Settings → Environments**.
+In the repo: **Settings -> Environments**.
 
 Create:
 
@@ -38,10 +40,10 @@ No API token is stored in GitHub. PyPI trusts this repo + workflow.
 **TestPyPI** (do this first):
 
 1. Sign in at [https://test.pypi.org](https://test.pypi.org)
-2. Account settings → **Publishing** (or create the pending project)
+2. Account settings -> **Publishing** (or create the pending project)
 3. Add a **trusted publisher**:
    - Owner: your GitHub user or org
-   - Repository: `Better_Threads` (the repo name on GitHub)
+   - Repository: `CThreads` (the repo name on GitHub)
    - Workflow: `release.yml`
    - Environment: `testpypi`
 
@@ -56,7 +58,7 @@ Exact labels in the PyPI UI change occasionally; look for **Trusted publishers**
 
 ### 3. Branch protection (recommended)
 
-**Settings → Branches** → protect `main`:
+**Settings -> Branches** -> protect `main`:
 
 - Require a pull request
 - Require status checks to pass: the **CI** workflow `test (ubuntu-latest, py3.12)` job
@@ -66,7 +68,7 @@ Then `main` cannot merge red tests.
 ## Dry run (TestPyPI)
 
 1. Commit and push the workflows to `main` (or merge a PR). Confirm **CI** is green.
-2. **Actions → Release → Run workflow**. This **never** uploads to production PyPI.
+2. **Actions -> Release -> Run workflow**. This **never** uploads to production PyPI.
 3. Approve the `testpypi` environment if GitHub asks.
 4. Install:
 
@@ -80,10 +82,10 @@ python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-ur
 ## Production release
 
 1. Set `version` in `pyproject.toml` (must match the tag without the leading `v`).
-2. GitHub → **Releases → Draft a new release**.
+2. GitHub -> **Releases -> Draft a new release**.
 3. Tag `v0.1.0` (or whatever matches `project.version`). Target `main`.
 4. Click **Publish release**.
-5. Watch **Actions → Release**. Approve the `pypi` environment when asked.
+5. Watch **Actions -> Release**. Approve the `pypi` environment when asked.
 6. If tests, wheels, or the version check fail, **nothing is uploaded**.
 
 The version job compares `github.event.release.tag_name` (`v0.1.0`) to `project.version` (`0.1.0`). A mismatch fails the release before publish.
@@ -104,4 +106,4 @@ Windows 11 with Smart App Control on may still fail to **load** `cthreads_kernel
 |------|---------|------------|
 | `.github/workflows/ci.yml` | PR and push to `main` | No |
 | `.github/workflows/release.yml` | GitHub Release published | PyPI |
-| `.github/workflows/release.yml` | Actions → Run workflow | TestPyPI only |
+| `.github/workflows/release.yml` | Actions -> Run workflow | TestPyPI only |

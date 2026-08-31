@@ -1,4 +1,4 @@
-"""Skip the linalg suite when ``cthreads._ext.linalg`` is missing."""
+"""Skip the linalg suite when `cthreads._ext.linalg` is missing."""
 
 from __future__ import annotations
 

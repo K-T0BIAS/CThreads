@@ -113,7 +113,7 @@ def skip_if_kernel_runtime_error(exc: RuntimeError) -> None:
     """
     Skip integration tests when the native kernel cannot be built or loaded.
 
-    On Windows 11 with Smart App Control, unsigned ``cthreads_kernels.dll`` can
+    On Windows 11 with Smart App Control, unsigned `cthreads_kernels.dll` can
     fail LoadLibrary (GetLastError=4551) even when the file exists locally.
     CI/Linux is unaffected; skip + warn instead of failing the suite.
     """
@@ -122,7 +122,7 @@ def skip_if_kernel_runtime_error(exc: RuntimeError) -> None:
     msg = str(exc)
     if is_kernel_load_failure(exc):
         warnings.warn(
-            f"kernel DLL load blocked — skipping test ({msg})",
+            f"kernel DLL load blocked - skipping test ({msg})",
             UserWarning,
             stacklevel=3,
         )

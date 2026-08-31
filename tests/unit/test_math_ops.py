@@ -1,4 +1,4 @@
-"""Unit tests for math → std:: lowering (stdlib Math plugin + Syntax)."""
+"""Unit tests for math -> std:: lowering (stdlib Math plugin + Syntax)."""
 
 from __future__ import annotations
 

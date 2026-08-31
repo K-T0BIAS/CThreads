@@ -127,7 +127,7 @@ print(counter.value)
 
 - Hold the lock only for the short critical section, not for the whole heavy compute if you can avoid it.
 - Always `release` on every path that acquired (including early returns). Prefer a clear acquire/release pair over long nested control flow.
-- One shared object → one lock that all writers/readers of that object agree on. Two locks on the same data without a fixed order invites **deadlocks** (A holds L1 waits for L2; B holds L2 waits for L1).
+- One shared object -> one lock that all writers/readers of that object agree on. Two locks on the same data without a fixed order invites **deadlocks** (A holds L1 waits for L2; B holds L2 waits for L1).
 - Locks coordinate concurrent accessors. Mid-run **visibility on the Python host** still needs `job.sync_state()` / `__sync_state()` or join/await writeback ([sync_state_docs](../sync_state_docs.md)).
 
 
@@ -205,7 +205,7 @@ print(cfg.scale)
 **Practices:**
 
 - Prefer `RWLock` when reads dominate; prefer plain `Lock` when almost every access writes.
-- Do not upgrade read → write while still holding the read lock (deadlock risk). Release the read lock first, then acquire write.
+- Do not upgrade read -> write while still holding the read lock (deadlock risk). Release the read lock first, then acquire write.
 - Match every `acquire_*` with the matching `release_*`.
 
 
@@ -304,8 +304,8 @@ You need state sync when:
 
 | Tool | Who calls it | Typical use |
 |---|---|---|
-| `__sync_state()` | Inside `@Thread` | Kernel pushes pack → Python at a safe point |
-| `job.sync_state()` | Host Python | Host pulls pack → Python while the job runs |
+| `__sync_state()` | Inside `@Thread` | Kernel pushes pack -> Python at a safe point |
+| `job.sync_state()` | Host Python | Host pulls pack -> Python while the job runs |
 | `TBuffer` | Kernel publishes; host/UI reads | High-rate frames without stopping the producer on every GUI tick |
 
 Deep internals (bridge, TLS, by-ref packs): [sync_state_docs.md](../sync_state_docs.md).

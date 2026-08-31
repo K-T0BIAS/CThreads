@@ -1,9 +1,9 @@
-# Marshal and module.cpp — how Python args reach native kernels
+# Marshal and module.cpp - how Python args reach native kernels
 
 This guide explains the two halves of cthreads job launch:
 
-1. **`cthreads.marshal`** (Python) — walks compile-time schemas and reads/writes C++ data through the kernel DLL’s trampoline accessors.
-2. **`src/cthreads/cpp/bindings/module.cpp`** (native `_ext`) — owns `Job` objects, allocates the per-job **pack**, calls marshal, runs the kernel off the GIL, and mirrors results back to Python.
+1. **`cthreads.marshal`** (Python) - walks compile-time schemas and reads/writes C++ data through the kernel DLL’s trampoline accessors.
+2. **`src/cthreads/cpp/bindings/module.cpp`** (native `_ext`) - owns `Job` objects, allocates the per-job **pack**, calls marshal, runs the kernel off the GIL, and mirrors results back to Python.
 
 Together they implement the **pack model**: each `@Thread` job gets a private C++ args struct (the pack). Python passes **values** at spawn; workers mutate **native** memory; sync copies native state back into the **same Python objects** you passed in.
 
@@ -11,7 +11,7 @@ Together they implement the **pack model**: each `@Thread` job gets a private C+
 
 ## The big picture (one sentence)
 
-**Python values → pack (spawn) → kernel runs on pack (+ SharedHost for cooperative `Shared[T]`) → writeback/sync copies pack (and shared host) → Python again.**
+**Python values -> pack (spawn) -> kernel runs on pack (+ SharedHost for cooperative `Shared[T]`) -> writeback/sync copies pack (and shared host) -> Python again.**
 
 ```mermaid
 flowchart LR
@@ -48,7 +48,7 @@ flowchart LR
 
 ---
 
-## Part 1 — What is a “pack”?
+## Part 1 - What is a “pack”?
 
 When you compile `@Thread def step(p: Particle, xs: list[float])`, codegen emits:
 
@@ -60,23 +60,23 @@ When you compile `@Thread def step(p: Particle, xs: list[float])`, codegen emits
 | Call trampoline | `step__call(p)` | Reads pack fields, calls your compiled `step(...)` |
 | Field accessors | `step__set_a0_x`, `step__get_a0_x`, … | Marshaling API used by Python |
 
-**Important:** the pack is **per job**. Two concurrent `thread()` calls → two packs → no cross-job clobber (marshal never uses a global pack slot).
+**Important:** the pack is **per job**. Two concurrent `thread()` calls -> two packs -> no cross-job clobber (marshal never uses a global pack slot).
 
 The pack also carries a **`SharedHost* __shared_host`** pointer (always present in current trampolines). Cooperative **`Shared[T]`** params are read from the host at call time; staging fields `a{i}` still exist for marshal promote/demote.
 
 ---
 
-## Part 2 — `marshal.py` in depth
+## Part 2 - `marshal.py` in depth
 
 File: `src/cthreads/python/cthreads/marshal.py`
 
 ### 2.1 Design constraints (read the module docstring)
 
-- **Explicit pack pointer** on every entry point — thread-safe across concurrent jobs.
-- **Cached `CDLL`** — one load per kernel path; avoids Windows loader deadlocks.
-- **`_call` uses `CFUNCTYPE` per call** — never mutates `fn.argtypes` on shared CDLL symbols (that used to race and hang).
+- **Explicit pack pointer** on every entry point - thread-safe across concurrent jobs.
+- **Cached `CDLL`** - one load per kernel path; avoids Windows loader deadlocks.
+- **`_call` uses `CFUNCTYPE` per call** - never mutates `fn.argtypes` on shared CDLL symbols (that used to race and hang).
 
-### 2.2 `_Path` — addressing nested data
+### 2.2 `_Path` - addressing nested data
 
 Lists and dicts in the pack are not flat. A list element `xs[3]` or dict key `"foo"` needs extra index/key arguments on accessor functions.
 
@@ -87,12 +87,12 @@ class _Path:
     keys: list[tuple[str, Any]] = field(default_factory=list)
 ```
 
-- **`indices`** — appended for each list level (`size_t` extras in C++).
-- **`keys`** — `("str", "foo")` or `("int", 42)` for dict keys.
+- **`indices`** - appended for each list level (`size_t` extras in C++).
+- **`keys`** - `("str", "foo")` or `("int", 42)` for dict keys.
 
 `_extra(path)` turns a path into ctypes arguments; `_ctype_extras(path)` builds the matching argtypes list.
 
-### 2.3 Primitives — `_set_prim` / `_get_prim`
+### 2.3 Primitives - `_set_prim` / `_get_prim`
 
 For parameter prefix `a0` and float field, marshal calls:
 
@@ -103,7 +103,7 @@ step__get_a0(pack, ..., double* out)
 
 Strings use a length helper + buffer copy on read. This is the simplest round-trip.
 
-### 2.4 `pack_value` — recursive pack (Python → C++)
+### 2.4 `pack_value` - recursive pack (Python -> C++)
 
 Called for each parameter slot `a{i}` with that param’s **TypeSchema** (from `__kernel_meta__`).
 
@@ -116,9 +116,9 @@ Called for each parameter slot `a{i}` with that param’s **TypeSchema** (from `
 | `tbuffer` | Store **native pointer** via `__set_a{i}_ptr` (no copy) |
 | `sync` | Store Lock/Event/RWLock pointer (no copy) |
 
-**TBuffer / sync are not copied** — only the address of an existing host/native object is stored. That is how multiple jobs share one triple buffer when you pass the same handle.
+**TBuffer / sync are not copied** - only the address of an existing host/native object is stored. That is how multiple jobs share one triple buffer when you pass the same handle.
 
-### 2.5 `unpack_value` — recursive unpack (C++ → Python)
+### 2.5 `unpack_value` - recursive unpack (C++ -> Python)
 
 Mirror of `pack_value`. Used for:
 
@@ -156,8 +156,8 @@ worker__demote_a0_shared(pack, SharedHost*)
 worker__demote_return_shared(pack, SharedHost*)   # if return is Shared[T]
 ```
 
-- **Promote (spawn):** move staged `a{i}` → `host->set(name, …)` (first job seeds; later jobs no-op on `set` but still register).
-- **Demote (sync/return):** copy `host->get<T>(name)` → staged `a{i}` so existing pack accessors + `writeback_params` / `unpack_return` work unchanged.
+- **Promote (spawn):** move staged `a{i}` -> `host->set(name, …)` (first job seeds; later jobs no-op on `set` but still register).
+- **Demote (sync/return):** copy `host->get<T>(name)` -> staged `a{i}` so existing pack accessors + `writeback_params` / `unpack_return` work unchanged.
 
 #### `writeback_job_state`
 
@@ -166,7 +166,7 @@ demote_shared_from_host(...)
 writeback_params(...)
 ```
 
-Used for **`__sync_state()`**, **`job.sync_state()`**, and final job completion — one unified path.
+Used for **`__sync_state()`**, **`job.sync_state()`**, and final job completion - one unified path.
 
 #### `unpack_return(meta, pack_ptr, host_ptr=0)`
 
@@ -174,7 +174,7 @@ If `meta["return_pass_as"] == "shared"`, demotes `__return__` from the host into
 
 ---
 
-## Part 3 — `module.cpp` in depth
+## Part 3 - `module.cpp` in depth
 
 File: `src/cthreads/cpp/bindings/module.cpp`  
 Python module: **`cthreads._ext`**
@@ -194,7 +194,7 @@ thread_local JobContext* g_job = nullptr;
 
 Pool jobs use **`pool->shared_host`** instead (see `basePool.hpp`).
 
-### 3.2 `SpawnedKernel` — the C++ side of `Job`
+### 3.2 `SpawnedKernel` - the C++ side of `Job`
 
 Key fields:
 
@@ -210,25 +210,25 @@ Key fields:
 
 **Lock order everywhere:** `state_mu` first, then GIL. Never reverse (deadlock with host sync).
 
-### 3.3 `spawn_from_meta` — the launch pipeline
+### 3.3 `spawn_from_meta` - the launch pipeline
 
 This is the **main entry point** for both `cthreads.thread()` and `pool.submit()`.
 
 Rough order:
 
 1. **Validate** meta, arg count, kernel symbols loaded.
-2. **`pack = Fn__args_new()`** — allocate empty pack in the kernel DLL heap.
-3. **`fill_pack_from_values`** → Python `marshal.pack_params` — fill staging fields (including shared).
-4. **Resolve SharedHost** — pool’s host or `default_shared_host`.
-5. **`promote_shared_to_host`** — move shared params into named host slots.
-6. **`register_job(shared_symbols)`** — bump per-symbol refcounts (queued jobs count too).
-7. **`attach_shared_host_to_pack`** — `Fn__set_shared_host(pack, host)`.
+2. **`pack = Fn__args_new()`** - allocate empty pack in the kernel DLL heap.
+3. **`fill_pack_from_values`** -> Python `marshal.pack_params` - fill staging fields (including shared).
+4. **Resolve SharedHost** - pool’s host or `default_shared_host`.
+5. **`promote_shared_to_host`** - move shared params into named host slots.
+6. **`register_job(shared_symbols)`** - bump per-symbol refcounts (queued jobs count too).
+7. **`attach_shared_host_to_pack`** - `Fn__set_shared_host(pack, host)`.
 8. Build **`make_kernel_job`** closure; queue on pool or wrap in `CThread`.
 9. Return **`shared_ptr<SpawnedKernel>`** to Python as `Job`.
 
 On spawn failure after `pack` alloc, **`args_free`** runs in the catch block.
 
-### 3.4 `make_kernel_job` — what actually runs on the worker
+### 3.4 `make_kernel_job` - what actually runs on the worker
 
 ```cpp
 // 1) Install JobContext for __sync_state
@@ -251,7 +251,7 @@ free pack;
 
 If the kernel throws, TLS is cleared and shared registration is undone without final writeback.
 
-### 3.5 Mid-run sync — `__sync_state()` path
+### 3.5 Mid-run sync - `__sync_state()` path
 
 Generated kernels call `cthreads::detail::__sync_state()` -> bridge -> **`cthreads_ext_sync_state`**:
 
@@ -263,7 +263,7 @@ void job_do_writeback(JobContext* ctx) {
 }
 ```
 
-Host Python can also call **`job.sync_state()`** — same effect via `SpawnedKernel::sync_state()` (uses stored pack/meta, not TLS).
+Host Python can also call **`job.sync_state()`** - same effect via `SpawnedKernel::sync_state()` (uses stored pack/meta, not TLS).
 
 **Shared[T] is not live-synced like TBuffer.** Python updates only when sync runs (or on `join()` / `result()` at the end).
 
@@ -271,28 +271,28 @@ Host Python can also call **`job.sync_state()`** — same effect via `SpawnedKer
 
 `SharedHost` (`shared_host.hpp`):
 
-- **`set(name, T)`** — first writer allocates; later `set` for same name is a no-op (cooperative seed once).
-- **`register_job(names)`** — each participating job increments symbol refs at spawn.
-- **`unregister_job(names)`** — on job end; destroys symbol when last ref hits zero.
-- **`replace(name, T)`** — used for **`Shared` return** snapshot into `__return__`.
+- **`set(name, T)`** - first writer allocates; later `set` for same name is a no-op (cooperative seed once).
+- **`register_job(names)`** - each participating job increments symbol refs at spawn.
+- **`unregister_job(names)`** - on job end; destroys symbol when last ref hits zero.
+- **`replace(name, T)`** - used for **`Shared` return** snapshot into `__return__`.
 
 Bare threads and pools share the same mechanism; only the **`shared_ptr` owner** differs.
 
 ---
 
-## Part 4 — Pass modes compared
+## Part 4 - Pass modes compared
 
 | Annotation | Native storage during run | Pack staging | Python sync |
 |------------|---------------------------|--------------|-------------|
 | `int`, `float`, … | Pack copy (by value) | Same | N/A (immutable snapshot) |
 | `list`, `dict`, `@Threadable` | Pack copy | Same | `writeback_params` from pack |
 | `Shared[T]` | **SharedHost** named slot | Promote/demote bridge | `writeback_job_state` |
-| `TBuffer[...]` | Existing triple buffer | Pointer in pack | **No writeback** — host polls generation |
+| `TBuffer[...]` | Existing triple buffer | Pointer in pack | **No writeback** - host polls generation |
 | `Lock`, `Event`, … | Existing sync object | Pointer in pack | No writeback |
 
 ---
 
-## Part 5 — Worked example (shared list)
+## Part 5 - Worked example (shared list)
 
 ### Python
 
@@ -318,9 +318,9 @@ for j in jobs:
 ### Spawn (host thread, with GIL)
 
 1. `bind_args` orders kwargs/positionals.
-2. `pack_params` copies `head` → `worker__args.a0` (staging vector).
-3. `worker__promote_a0_shared(pack, host)` → `host["head"]` owns the vector all workers share.
-4. `host.register_job(["head"])` × 4 jobs → refcount 4.
+2. `pack_params` copies `head` -> `worker__args.a0` (staging vector).
+3. `worker__promote_a0_shared(pack, host)` -> `host["head"]` owns the vector all workers share.
+4. `host.register_job(["head"])` × 4 jobs -> refcount 4.
 5. Pack gets `__shared_host = host`.
 
 ### Worker (no GIL during kernel)
@@ -335,13 +335,13 @@ Each worker mutates the **same** native vector.
 
 ### Sync / join
 
-`writeback_job_state` → demote host → staging `a0` → `writeback_params` → your Python **`head`** list updates.
+`writeback_job_state` -> demote host -> staging `a0` -> `writeback_params` -> your Python **`head`** list updates.
 
 When the last job unregisters, host destroys `"head"` if nothing else holds it.
 
 ---
 
-## Part 6 — Worked example (classic ref list)
+## Part 6 - Worked example (classic ref list)
 
 ```python
 @Thread
@@ -352,25 +352,25 @@ xs = [1]
 job = thread(bump, xs)
 job.start()
 job.join()
-# xs[0] == 2 — writeback copied pack vector into Python list
+# xs[0] == 2 - writeback copied pack vector into Python list
 ```
 
 Here every job would get its **own pack copy** unless you pass the same logical sharing via **`Shared[list[int]]`**.
 
 ---
 
-## Part 7 — Function reference cheat sheet
+## Part 7 - Function reference cheat sheet
 
 ### Python (`marshal.py`)
 
 | Function | When |
 |----------|------|
-| `pack_params` | Spawn: Python → pack |
-| `promote_shared_to_host` | Spawn: pack staging → SharedHost |
-| `demote_shared_from_host` | Sync/return: SharedHost → pack staging |
-| `writeback_params` | Sync: pack → Python (ref types) |
+| `pack_params` | Spawn: Python -> pack |
+| `promote_shared_to_host` | Spawn: pack staging -> SharedHost |
+| `demote_shared_from_host` | Sync/return: SharedHost -> pack staging |
+| `writeback_params` | Sync: pack -> Python (ref types) |
 | `writeback_job_state` | demote + writeback_params |
-| `unpack_return` | Join: pack.ret → Python value |
+| `unpack_return` | Join: pack.ret -> Python value |
 
 ### C++ (`module.cpp`)
 
@@ -385,20 +385,20 @@ Here every job would get its **own pack copy** unless you pass the same logical 
 
 ---
 
-## Part 8 — Mental model for debugging
+## Part 8 - Mental model for debugging
 
-1. **“Python doesn’t see my kernel writes”** — Did you call `sync_state` / `__sync_state`? Ref/shared mirror only on sync (except final join writeback). TBuffer uses generation, not writeback.
-2. **“Workers don’t share state”** — Use **`Shared[T]`** or pass the same **TBuffer/sync** handle; plain `ref` lists are per-job pack copies.
-3. **“Crash after pool stop”** — Abandoned queued jobs `unregister_shared` in `mark_done` if the worker never ran.
-4. **“Missing symbol in marshal”** — Kernel DLL out of date; recompile so trampolines (`__promote_a0_shared`, etc.) exist.
+1. **“Python doesn’t see my kernel writes”** - Did you call `sync_state` / `__sync_state`? Ref/shared mirror only on sync (except final join writeback). TBuffer uses generation, not writeback.
+2. **“Workers don’t share state”** - Use **`Shared[T]`** or pass the same **TBuffer/sync** handle; plain `ref` lists are per-job pack copies.
+3. **“Crash after pool stop”** - Abandoned queued jobs `unregister_shared` in `mark_done` if the worker never ran.
+4. **“Missing symbol in marshal”** - Kernel DLL out of date; recompile so trampolines (`__promote_a0_shared`, etc.) exist.
 
 ---
 
-## Part 9 — Related docs
+## Part 9 - Related docs
 
-- [sync_state_docs.md](../sync_state_docs.md) — TLS bridge and lock ordering
-- [guide/jobs.md](./jobs.md) — Job lifecycle from Python
-- [guide/sync.md](./sync.md) — TBuffer vs locks vs writeback
+- [sync_state_docs.md](../sync_state_docs.md) - TLS bridge and lock ordering
+- [guide/jobs.md](./jobs.md) - Job lifecycle from Python
+- [guide/sync.md](./sync.md) - TBuffer vs locks vs writeback
 
 ---
 

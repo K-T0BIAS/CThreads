@@ -111,11 +111,11 @@ Compile usually happens on the first `thread(...)` call if no kernel library is 
 
 ```text
 thread(move, p, 0.1)
-  → prepare()
-      → compile()   # write .hpp / .cpp next to demo.py
-      → build()     # compile those into one shared library
-  → load_kernels(path_to_shared_library)
-  → spawn the job
+  -> prepare()
+      -> compile()   # write .hpp / .cpp next to demo.py
+      -> build()     # compile those into one shared library
+  -> load_kernels(path_to_shared_library)
+  -> spawn the job
 ```
 
 `compile()` drains the registry in a fixed order:
@@ -126,10 +126,10 @@ thread(move, p, 0.1)
 For our example that means:
 
 ```text
-1. compile Particle  →  my_project/__Threadable__/Particle.hpp
+1. compile Particle  ->  my_project/__Threadable__/Particle.hpp
                          my_project/__Threadable__/Particle.cpp
 
-2. compile move      →  my_project/__Thread__/move.hpp
+2. compile move      ->  my_project/__Thread__/move.hpp
                          my_project/__Thread__/move.cpp
 ```
 
@@ -163,8 +163,8 @@ What `compile()` does internally (registry order, cache, which Python files run)
 
 - Class name: `Particle`
 - Fields from annotations:
-  - `x` → Python `float`
-  - `y` → Python `float`
+  - `x` -> Python `float`
+  - `y` -> Python `float`
 - Methods marked `@Thread`: **none** in this example
 
 ### 3.2 Type mapping for fields
@@ -173,8 +173,8 @@ Each field annotation is turned into a small internal type object, then into a C
 
 | Python annotation | Internal mapping | C++ field declaration |
 |-------------------|------------------|------------------------|
-| `x: float` | float → C++ `double` | `double x;` |
-| `y: float` | float → C++ `double` | `double y;` |
+| `x: float` | float -> C++ `double` | `double x;` |
+| `y: float` | float -> C++ `double` | `double y;` |
 
 No extra `#include` is needed for `double`.
 
@@ -311,14 +311,14 @@ AST: `Assign(target=p.x, value=(p.x + dt))`
 Walk of the right-hand side (`BinOp`):
 
 1. Left: `Attribute(p, x)`
-   - base name `p` → `"p"`
-   - attribute → `"p.x"`
-2. Right: name `dt` → `"dt"`
-3. Operator `+` → wrap as `"(p.x + dt)"`
+   - base name `p` -> `"p"`
+   - attribute -> `"p.x"`
+2. Right: name `dt` -> `"dt"`
+3. Operator `+` -> wrap as `"(p.x + dt)"`
 
 Walk of the left-hand side:
 
-1. `Attribute(p, x)` → `"p.x"`
+1. `Attribute(p, x)` -> `"p.x"`
 
 Assign joins them:
 
@@ -398,9 +398,9 @@ Setter / getter names for fields:
 
 Naming pattern:
 
-- Parameter index `i` → prefix `a{i}`
-- Threadable field → `{prefix}_{field_name}` → `a0_x`, `a0_y`
-- Primitive parameter → just `a1`
+- Parameter index `i` -> prefix `a{i}`
+- Threadable field -> `{prefix}_{field_name}` -> `a0_x`, `a0_y`
+- Primitive parameter -> just `a1`
 
 ### 5.2 `__kernel_meta__` attached to the Python function
 
@@ -456,8 +456,8 @@ Codegen produces trampolines in two forms:
 
 | Form | Where it lives | What it is |
 |------|----------------|------------|
-| **Declaration** | `move.hpp` | Name + argument types only; ends with `;` — “this symbol exists” |
-| **Definition** | `move.cpp` | Full function body in `{ ... }` — “here is the code” |
+| **Declaration** | `move.hpp` | Name + argument types only; ends with `;` - “this symbol exists” |
+| **Definition** | `move.cpp` | Full function body in `{ ... }` - “here is the code” |
 
 Think of declarations as the **menu** of exported entry points, and definitions as the **kitchen**.
 
@@ -470,8 +470,8 @@ There are also two *families* of trampoline symbols:
 
 How the current codegen splits them:
 
-- **Lifecycle** → declared in `move.hpp` **and** defined in `move.cpp`
-- **Accessors** → defined in `move.cpp` with `CTHREADS_API` (exported from the DLL). They are **not** listed in `move.hpp` today; marshal finds them by **symbol name** via ctypes after `load_kernels`
+- **Lifecycle** -> declared in `move.hpp` **and** defined in `move.cpp`
+- **Accessors** -> defined in `move.cpp` with `CTHREADS_API` (exported from the DLL). They are **not** listed in `move.hpp` today; marshal finds them by **symbol name** via ctypes after `load_kernels`
 
 The subsections below show both: what actually lands in the header, then the full accessor API as declarations (so you can see every signature), then the matching definitions.
 
@@ -479,7 +479,7 @@ The subsections below show both: what actually lands in the header, then the ful
 
 Start from `__kernel_meta__` for `move`. Walk parameters in order. For each parameter, walk its schema. Emit one set of accessor names per leaf (or per nested field).
 
-#### Step A — lifecycle declarations (always three)
+#### Step A - lifecycle declarations (always three)
 
 From meta fields:
 
@@ -493,33 +493,33 @@ These three are exactly what `emit_trampoline_decls(meta)` writes into `move.hpp
 
 Meaning of each:
 
-1. **`move__args_new`** — no inputs; returns an opaque `void*` pointing at a fresh `move__args`.
-2. **`move__args_free`** — takes that pointer; deletes the pack.
-3. **`move__call`** — takes that pointer; casts it back to `move__args*` and calls the real `move(...)`.
+1. **`move__args_new`** - no inputs; returns an opaque `void*` pointing at a fresh `move__args`.
+2. **`move__args_free`** - takes that pointer; deletes the pack.
+3. **`move__call`** - takes that pointer; casts it back to `move__args*` and calls the real `move(...)`.
 
-#### Step B — pack layout (needed to understand accessors)
+#### Step B - pack layout (needed to understand accessors)
 
 Before accessors make sense, the pack struct must exist (defined in the `.cpp`, not declared as a public type in the header):
 
 ```cpp
 struct move__args {
-    Particle a0;   // param index 0 → always named a0
-    double   a1;   // param index 1 → always named a1
+    Particle a0;   // param index 0 -> always named a0
+    double   a1;   // param index 1 -> always named a1
 };
 ```
 
 No `ret` member, because return kind is `void`.
 
-#### Step C — accessor declarations for param 0 (`p: Particle`)
+#### Step C - accessor declarations for param 0 (`p: Particle`)
 
-Param index `0` → prefix `a0`.  
+Param index `0` -> prefix `a0`.  
 Schema kind is `threadable`, so there is **no** single `move__set_a0(Particle)`.  
 Instead, recurse into fields:
 
 | Field | Child prefix | Leaf kind | Declarations produced |
 |-------|--------------|-----------|------------------------|
-| `x` | `a0_x` | `float` → C++ `double` | set + get below |
-| `y` | `a0_y` | `float` → C++ `double` | set + get below |
+| `x` | `a0_x` | `float` -> C++ `double` | set + get below |
+| `y` | `a0_y` | `float` -> C++ `double` | set + get below |
 
 For a non-string primitive leaf, the declaration pair is always:
 
@@ -548,9 +548,9 @@ Argument shapes (same for every float/int/bool accessor in this example):
 | `double v` (set) | Value to store |
 | `double* v` (get) | Out-pointer; callee writes `*v = ...` |
 
-#### Step D — accessor declarations for param 1 (`dt: float`)
+#### Step D - accessor declarations for param 1 (`dt: float`)
 
-Param index `1` → prefix `a1`.  
+Param index `1` -> prefix `a1`.  
 Schema kind is already a primitive (`float`), so no field walk:
 
 ```cpp
@@ -558,7 +558,7 @@ CTHREADS_API void move__set_a1(void* p, double v);
 CTHREADS_API void move__get_a1(void* p, double* v);
 ```
 
-#### Step E — full trampoline declaration list for this example
+#### Step E - full trampoline declaration list for this example
 
 Putting lifecycle + accessors together (the complete exported trampoline API for `move`):
 
@@ -670,7 +670,7 @@ CTHREADS_API void move__call(void* p) {
 }
 ```
 
-Line up declaration → definition for one accessor:
+Line up declaration -> definition for one accessor:
 
 ```text
 Declaration (logical API):
@@ -687,7 +687,7 @@ What the body is doing, in words:
 1. Treat opaque `p` as a `move__args*`.
 2. Assign into member `a0.x` (the Particle’s `x` field inside the pack).
 
-Same pattern for every other set/get: cast → touch one field or `a1`.
+Same pattern for every other set/get: cast -> touch one field or `a1`.
 
 Important detail for `pass_as: "ref"`:
 
@@ -704,8 +704,8 @@ Important detail for `pass_as: "ref"`:
 | Pack `p.y` | `move__set_a0_y` | `move__set_a0_y(pack, 2.0)` |
 | Pack `dt` | `move__set_a1` | `move__set_a1(pack, 0.1)` |
 | Run kernel | `move__call` | `move__call(pack)` |
-| Writeback `x` | `move__get_a0_x` | `move__get_a0_x(pack, &tmp)` → `p.x = tmp` |
-| Writeback `y` | `move__get_a0_y` | `move__get_a0_y(pack, &tmp)` → `p.y = tmp` |
+| Writeback `x` | `move__get_a0_x` | `move__get_a0_x(pack, &tmp)` -> `p.x = tmp` |
+| Writeback `y` | `move__get_a0_y` | `move__get_a0_y(pack, &tmp)` -> `p.y = tmp` |
 | Destroy pack | `move__args_free` | `move__args_free(pack)` |
 
 ---
@@ -766,7 +766,7 @@ and wraps the returned native handle in a Python `Job`.
 2. `move.__kernel_meta__` must exist (from compile).
 3. Args/kwargs are bound against meta param names.
 
-### 7.3 `bind_args` → ordered values
+### 7.3 `bind_args` -> ordered values
 
 Meta params are named `"p"` and `"dt"`.
 
@@ -799,7 +799,7 @@ Still before the OS thread starts:
    ```
 
 3. Fill the pack from Python values (next section).
-4. Build a worker lambda that will later: call → writeback → unpack return → free.
+4. Build a worker lambda that will later: call -> writeback -> unpack return -> free.
 5. Wrap that lambda in a `CThread` inside a `SpawnedKernel`.
 6. Return it to Python as a `Job` (**not started yet** unless you `start()` / `await`).
 
@@ -810,7 +810,7 @@ Still before the OS thread starts:
 
 ---
 
-## 8. Packing: Python values → C++ pack
+## 8. Packing: Python values -> C++ pack
 
 Packing is done by `fill_pack_from_values` in C++, which immediately calls Python:
 
@@ -864,13 +864,13 @@ for field in schema["fields"]:
 
 Concrete calls for our numbers:
 
-1. Read `p.x` → `1.0`  
+1. Read `p.x` -> `1.0`  
    Call `move__set_a0_x(pack, 1.0)`  
-   → pack memory: `a0.x = 1.0`
+   -> pack memory: `a0.x = 1.0`
 
-2. Read `p.y` → `2.0`  
+2. Read `p.y` -> `2.0`  
    Call `move__set_a0_y(pack, 2.0)`  
-   → pack memory: `a0.y = 2.0`
+   -> pack memory: `a0.y = 2.0`
 
 ### 8.4 Pack parameter 1 (`dt`)
 
@@ -880,7 +880,7 @@ Schema kind is `float` (primitive):
 move__set_a1(pack, 0.1)
 ```
 
-→ pack memory: `a1 = 0.1`
+-> pack memory: `a1 = 0.1`
 
 ### 8.5 Pack after packing completes
 
@@ -921,8 +921,8 @@ move(a->a0, a->a1);
 Inside `move`:
 
 ```cpp
-p.x = (p.x + dt);   // 1.0 + 0.1 → 1.1
-p.y = (p.y + dt);   // 2.0 + 0.1 → 2.1
+p.x = (p.x + dt);   // 1.0 + 0.1 -> 1.1
+p.y = (p.y + dt);   // 2.0 + 0.1 -> 2.1
 ```
 
 Because `p` is a reference to `a->a0`, the pack now holds:
@@ -936,7 +936,7 @@ move__args {
 
 This kernel body runs **without needing the Python GIL** for the arithmetic itself.
 
-### 9.2 Writeback (C++ pack → Python object)
+### 9.2 Writeback (C++ pack -> Python object)
 
 After `move__call` returns, the worker acquires the GIL and calls:
 
@@ -949,13 +949,13 @@ Primitives like `dt` are not written back.
 
 For `a0` / `p`, it uses getters and writes into the **same** Python object that was passed in:
 
-1. `move__get_a0_x(pack, &tmp)` → `1.1` → set `p.x = 1.1`
-2. `move__get_a0_y(pack, &tmp)` → `2.1` → set `p.y = 2.1`
+1. `move__get_a0_x(pack, &tmp)` -> `1.1` -> set `p.x = 1.1`
+2. `move__get_a0_y(pack, &tmp)` -> `2.1` -> set `p.y = 2.1`
 
 So the mutation model is:
 
 ```text
-copy fields in  →  mutate C++ copy in pack  →  copy fields out into original Python object
+copy fields in  ->  mutate C++ copy in pack  ->  copy fields out into original Python object
 ```
 
 Python never shared a live pointer to the C++ `Particle` with the Python instance. It shared **values**, twice.
@@ -997,24 +997,24 @@ print(job.result())  # None
 
 ```text
 demo.py import
-  @Threadable Particle  →  mark + REGISTRY.threadables["Particle"]
-  @Thread move          →  mark + REGISTRY.threads["move"]
+  @Threadable Particle  ->  mark + REGISTRY.threadables["Particle"]
+  @Thread move          ->  mark + REGISTRY.threads["move"]
 
 first thread(move, p, 0.1)
   prepare/compile
-    Particle → struct Particle { double x; double y; }
+    Particle -> struct Particle { double x; double y; }
                  in __Threadable__/Particle.{hpp,cpp}
-    move     → void move(Particle& p, double dt) { ... }
+    move     -> void move(Particle& p, double dt) { ... }
                  + struct move__args { Particle a0; double a1; }
                  + hpp decls: move__args_new / free / call
                  + cpp defs: those three + set/get a0_x, a0_y, a1
                  + move.__kernel_meta__
                  in __Thread__/move.{hpp,cpp}
-  build → cthreads_kernels shared library
+  build -> cthreads_kernels shared library
   load_kernels(that library)
 
 spawn
-  bind args → [p, 0.1]
+  bind args -> [p, 0.1]
   pack = move__args_new()
   marshal.pack_params:
       move__set_a0_x(pack, 1.0)
@@ -1029,7 +1029,7 @@ job.start()
     result = None
     move__args_free(pack)
 
-job.join(); job.result() → None
+job.join(); job.result() -> None
 p is updated in place
 ```
 
@@ -1055,7 +1055,7 @@ If you remember only one sentence:
 
 ---
 
-## 12. Compile in depth (registry → C++ files)
+## 12. Compile in depth (registry -> C++ files)
 
 §2 said `compile()` writes folders. This section is the same step, slower, aimed at someone who will change that code.
 
@@ -1066,7 +1066,7 @@ Words used here:
 | **Registry** | A process-wide dictionary filled by `@Threadable` / `@Thread` at import time (`REGISTRY` in `CONFIG.py`) |
 | **Unit** | One thing compile can emit: a Threadable class, or a free Thread function |
 | **Fingerprint** | A hash of the Python source of that unit, used to skip rewrite when nothing changed |
-| **Store** | `STORE`: unit name → path of the generated `.hpp` |
+| **Store** | `STORE`: unit name -> path of the generated `.hpp` |
 | **Syntax tree** | Python’s parsed form of the function (an **AST**: Abstract Syntax Tree). Nested objects, not text |
 
 Code lives mainly in:
@@ -1110,8 +1110,8 @@ Fixed order:
 
 ```text
 1. every @Threadable class
-     - fields → C++ struct members
-     - @Thread methods on that class → C++ member functions + C wrappers
+     - fields -> C++ struct members
+     - @Thread methods on that class -> C++ member functions + C wrappers
 2. every remaining @Thread function
      - skip methods already emitted in step 1 (matched by __qualname__)
      - emit free functions like move
@@ -1137,7 +1137,7 @@ Our `Particle` has no methods, so the `.cpp` is only `#include "Particle.hpp"`.
 `compile_free_thread(move)`:
 
 1. Output paths: `__Thread__/move.hpp`, `move.cpp`. Always refresh `cthreads_export.hpp` (the `CTHREADS_API` macro).
-2. Fingerprint the function source. Unchanged + files present → skip rewrite, but still rebuild `move.__kernel_meta__` so Python packing still works.
+2. Fingerprint the function source. Unchanged + files present -> skip rewrite, but still rebuild `move.__kernel_meta__` so Python packing still works.
 3. Otherwise call `translate_thread(move)` (the next section), then:
    - Write the kernel declaration into the `.hpp`, plus trampoline **lifecycle** declarations (`args_new` / `free` / `call`).
    - Write includes, the kernel **definition**, pack struct, trampoline **definitions** (lifecycle + set/get) into the `.cpp`.
@@ -1153,7 +1153,7 @@ Under the project root, compile keeps a small cache of `{ unit_name: { src_hash,
 |-----------|----------------|
 | First compile | Write files, store hashes |
 | Source of `move` unchanged | Do not rewrite `move.hpp` / `move.cpp`; still refresh metadata |
-| You edited `move`’s body | Hash changes → translate and rewrite those two files |
+| You edited `move`’s body | Hash changes -> translate and rewrite those two files |
 | `force=True` | Ignore hashes, rewrite everything |
 
 `build()` then compiles whatever `STORE` points at into one shared library. Unchanged C++ is still a normal compiler incremental build if the toolchain supports it.
@@ -1169,7 +1169,7 @@ Compile’s contract: **Python units in the registry become C++ text on disk, pl
 
 ---
 
-## 13. Translation in depth (syntax tree → C++ strings)
+## 13. Translation in depth (syntax tree -> C++ strings)
 
 Translation is the heart of a `@Thread` body. Compile *calls* it; translation does not know about DLLs or Jobs.
 
@@ -1187,8 +1187,8 @@ src/cthreads/python/cthreads/Thread/compile/
     signature.py                     # parameters + return type
     typeof.py                        # “what type is this expression?”
     name.py, attribute.py, binOp.py, call.py, ...
-  mathLibTranslators/                # math.sqrt → std::sqrt, cthreads.math.*
-  pythonContainerLibTranslators/     # list.append → push_back, dict.get, ...
+  mathLibTranslators/                # math.sqrt -> std::sqrt, cthreads.math.*
+  pythonContainerLibTranslators/     # list.append -> push_back, dict.get, ...
   syncBindingTranslators/            # Lock.acquire, Event.wait, triple-buffer
   linalgTranslations/                # ArrayF32.matmul, Shape, ...
 ```
@@ -1198,9 +1198,9 @@ src/cthreads/python/cthreads/Thread/compile/
 `translate_thread(move)`:
 
 1. Check `move.__threaded` and version match.
-2. `inspect.getsource(move)` → text of the `def`.
-3. Parse that text with Python’s `ast` module → a `FunctionDef` node (the tree in §4.1).
-4. `get_type_hints(move)` → `{ "p": Particle, "dt": float, "return": None }`.
+2. `inspect.getsource(move)` -> text of the `def`.
+3. Parse that text with Python’s `ast` module -> a `FunctionDef` node (the tree in §4.1).
+4. `get_type_hints(move)` -> `{ "p": Particle, "dt": float, "return": None }`.
 5. `translate_function(move, func_def, hints, owner_name=None)`.
 
 After step 3, **nobody looks at the original source text again**. Every later decision is “what kind of node is this?”
@@ -1214,11 +1214,11 @@ Two families of nodes:
 
 `translate.py` holds two dictionaries:
 
-- `EXPR_TRANSLATORS`: syntax-tree class → function that prints an expression
-- `STMT_TRANSLATORS`: syntax-tree class → function that prints statement lines
+- `EXPR_TRANSLATORS`: syntax-tree class -> function that prints an expression
+- `STMT_TRANSLATORS`: syntax-tree class -> function that prints statement lines
 
-Unknown expression → `TypeError` (“unsupported expression …”).  
-Unknown statement → a C++ comment `// unsupported statement: ...` (so a stray `import` does not crash the whole file; it also will not do what you wanted).
+Unknown expression -> `TypeError` (“unsupported expression …”).  
+Unknown statement -> a C++ comment `// unsupported statement: ...` (so a stray `import` does not crash the whole file; it also will not do what you wanted).
 
 ### 13.2 The scratch pad: `TranslateContext`
 
@@ -1230,7 +1230,7 @@ Every translator receives the same mutable object:
 | `func_name` | `"move"` (error messages) |
 | `hints` | The type-hint dict from step 4 above |
 | `owner_name` | `None` for a free function; `"Particle"` if this were a method |
-| `symbols` | **Name table**: Python local/parameter name → internal type object |
+| `symbols` | **Name table**: Python local/parameter name -> internal type object |
 | `sig_includes` / `body_includes` | `#include` lines for the header vs the `.cpp` body |
 | `seen_sig` / `seen_body` | Deduplicate those includes |
 
@@ -1238,15 +1238,15 @@ The **name table** is how the compiler knows that `p` is a Threadable and `dt` i
 
 | When | What is inserted |
 |------|------------------|
-| Translating the signature | `p` → Threadable `Particle`, `dt` → float |
-| `x: int = ...` (annotated assignment) | `x` → int |
-| `for i in range(n):` | `i` → int, then **removed** after the loop |
-| `for x in xs:` when `xs` is `list[float]` | `x` → float, then removed after the loop |
-| Method with `self` | `self` → Threadable of `owner_name` |
+| Translating the signature | `p` -> Threadable `Particle`, `dt` -> float |
+| `x: int = ...` (annotated assignment) | `x` -> int |
+| `for i in range(n):` | `i` -> int, then **removed** after the loop |
+| `for x in xs:` when `xs` is `list[float]` | `x` -> float, then removed after the loop |
+| Method with `self` | `self` -> Threadable of `owner_name` |
 
 Plain `x = 1` (no annotation) is **not** allowed for a new name. You must write `x: int = 1`. That is deliberate: the name table has no other way to learn `x`’s type.
 
-### 13.3 Python types → internal types → C++ names
+### 13.3 Python types -> internal types -> C++ names
 
 Annotations become small objects in `pyTypes.py` (`PyInt`, `PyFloat`, `PyList`, …). Then `.cpp_name` is what is printed.
 
@@ -1270,9 +1270,9 @@ Native cthreads classes (Lock, Array, …) are recognized because the pybind typ
 ### 13.4 Signature walk for `move` (same as §4.2, with the name table)
 
 1. No `self` (not a method).
-2. For `p`: hint `Particle` → `PyThreadable` → record `symbols["p"]`, add `#include "../__Threadable__/Particle.hpp"`, emit `Particle& p`.
-3. For `dt`: hint `float` → `PyFloat` → `symbols["dt"]`, emit `double dt`.
-4. Return hint `None` → `void`.
+2. For `p`: hint `Particle` -> `PyThreadable` -> record `symbols["p"]`, add `#include "../__Threadable__/Particle.hpp"`, emit `Particle& p`.
+3. For `dt`: hint `float` -> `PyFloat` -> `symbols["dt"]`, emit `double dt`.
+4. Return hint `None` -> `void`.
 5. Reject `*args`, `**kwargs`, keyword-only args.
 
 Result string:
@@ -1329,9 +1329,9 @@ Other statement kinds the compiler **does** handle (not used in `move`, same dis
 
 #### Names
 
-- `dt` → must be in the name table → print `dt`
-- unknown name → `TypeError`
-- `self` on a method → `(*this)` when used as a value; `self.x` is special-cased to `this->x`
+- `dt` -> must be in the name table -> print `dt`
+- unknown name -> `TypeError`
+- `self` on a method -> `(*this)` when used as a value; `self.x` is special-cased to `this->x`
 
 #### Constants
 
@@ -1347,8 +1347,8 @@ Other statement kinds the compiler **does** handle (not used in `move`, same dis
 
 Two different jobs, easy to mix up:
 
-1. **Print a path** — `p.x` → `p.x`, `self.x` → `this->x`. This does **not** look up whether `x` exists. The C++ compiler will fail later if the struct has no such member. Nested `p.a.b` is just string concatenation: `p.a.b`.
-2. **Special attributes** — `math.pi` → `std::numbers::pi`. Array properties like `a.shape` → `(a).shape()` (C++ uses a method, Python uses a property).
+1. **Print a path** - `p.x` -> `p.x`, `self.x` -> `this->x`. This does **not** look up whether `x` exists. The C++ compiler will fail later if the struct has no such member. Nested `p.a.b` is just string concatenation: `p.a.b`.
+2. **Special attributes** - `math.pi` -> `std::numbers::pi`. Array properties like `a.shape` -> `(a).shape()` (C++ uses a method, Python uses a property).
 
 #### Binary / unary / compare / and-or
 
@@ -1365,7 +1365,7 @@ Two different jobs, easy to mix up:
 
 #### Subscript
 
-`xs[i]` → `(xs[i])`. Python slice syntax `xs[1:3]` is **rejected** at the moment. Array slicing in the kernel should use `Slice` / methods until that translator exists.
+`xs[i]` -> `(xs[i])`. Python slice syntax `xs[1:3]` is **rejected** at the moment. Array slicing in the kernel should use `Slice` / methods until that translator exists.
 
 #### List displays
 
@@ -1384,7 +1384,7 @@ Order today:
 ```text
 1. len(...)
 2. __sync_state()          # kernel barrier: copy Threadables back to Python mid-run
-3. list / dict methods     # xs.append → push_back, ...
+3. list / dict methods     # xs.append -> push_back, ...
 4. triple-buffer methods   # publish, read_at, ...
 5. Lock / Event / RWLock
 6. Array / Shape methods   # matmul, transpose, ...
@@ -1405,18 +1405,18 @@ Python `list.append` is C++ `std::vector::push_back`. The method **tables** (`LI
 So:
 
 ```text
-xs.append(v)   →  (xs).push_back(v)
-lock.acquire() →  (lock).acquire()     # same name, still goes through the table
-a.matmul(b)    →  (a).matmul(b)
-a.count()      →  (a).count_nonzero()  # Python name ≠ C++ name
-math.sqrt(x)   →  std::sqrt(x)
+xs.append(v)   ->  (xs).push_back(v)
+lock.acquire() ->  (lock).acquire()     # same name, still goes through the table
+a.matmul(b)    ->  (a).matmul(b)
+a.count()      ->  (a).count_nonzero()  # Python name ≠ C++ name
+math.sqrt(x)   ->  std::sqrt(x)
 ```
 
 Math is resolved through `move.__globals__`: `math` must be the stdlib module, or `cthreads.math` must be the marked submodule. A random `fake.sqrt` is ignored.
 
 Constructors like `ArrayF32(sh)` are the same idea: look up the name in the function’s globals, check `__cthreads_internal__`, emit `cthreads::linalg::Array<float>(sh)`.
 
-### 13.8 Type of the receiver (`typeof`) — why `self.a.matmul(b)` works
+### 13.8 Type of the receiver (`typeof`) - why `self.a.matmul(b)` works
 
 The method tables need the type of the object **before the last dot**.
 
@@ -1424,13 +1424,13 @@ The method tables need the type of the object **before the last dot**.
 |------|---------------------|------------------------|
 | `a.matmul(b)` | name `a` | Name table: `a` was a parameter `a: ArrayF32` |
 | `self.a.matmul(b)` | attribute `self.a` | `self` is a Threadable; field `a` is read from that class’s annotations via `REGISTRY` |
-| `bodies[i].a.matmul(b)` | `bodies[i].a` | `bodies` is `list[Particle]` → element is `Particle` → field `a` |
+| `bodies[i].a.matmul(b)` | `bodies[i].a` | `bodies` is `list[Particle]` -> element is `Particle` -> field `a` |
 
 `typeof.py` implements that walk:
 
-1. Name → look up the name table.
-2. Attribute → if the base is a Threadable, `get_type_hints` on the **live class** in `REGISTRY.threadables` (the same annotations compile used to emit the struct). No handwritten field dictionary to keep in sync.
-3. Subscript `xs[i]` → if `xs` is a list type, the element type.
+1. Name -> look up the name table.
+2. Attribute -> if the base is a Threadable, `get_type_hints` on the **live class** in `REGISTRY.threadables` (the same annotations compile used to emit the struct). No handwritten field dictionary to keep in sync.
+3. Subscript `xs[i]` -> if `xs` is a list type, the element type.
 
 Printing the C++ path (`this->a`) is a separate walk (`attribute.py`). Mixing them up is the usual contributor bug: the path can print even when the type is unknown; the **call** will then fail with “unsupported call” because no method table ran.
 
@@ -1447,9 +1447,9 @@ Whenever a translator needs a C++ header, it calls `add_include` on either `sig_
 
 Examples:
 
-- `Particle& p` → Particle header on the signature
-- `math.sqrt` → `#include <cmath>` on the body
-- `ArrayF32` local → `linalg/array.hpp` on the body
+- `Particle& p` -> Particle header on the signature
+- `math.sqrt` -> `#include <cmath>` on the body
+- `ArrayF32` local -> `linalg/array.hpp` on the body
 
 `compile_free_thread` writes signature includes into `move.hpp` and any extra body includes into `move.cpp` under the `#include "move.hpp"`.
 
@@ -1478,7 +1478,7 @@ These are not oversights in `move`; they are policy for every Thread body:
 - No Python `None` as a value.
 - Calls must match a matcher in §13.7 (no arbitrary `print`, no `obj.unknown()`).
 - Host-only Array helpers (`from_list`, `to_list`) are not kernel operations; build arrays in Python and pass them in.
-- Method tables still list Python names that are not 1:1 with C++ (`append`, `count`, …). Do not replace those tables with “whatever exists on the Python class” — the Python class is the **host** API, the table is the **kernel** API.
+- Method tables still list Python names that are not 1:1 with C++ (`append`, `count`, …). Do not replace those tables with “whatever exists on the Python class” - the Python class is the **host** API, the table is the **kernel** API.
 
 ---
 
@@ -1504,7 +1504,7 @@ Do **not** teach `typeof` about the method. `typeof` only answers “what is the
 ### 14.3 New native type (another `cthreads.*` class)
 
 1. Mark the pybind class `__cthreads_internal__ = True` (like Lock / Array).
-2. Add a row to `CTHREADS_INTERNAL_TYPES` in `pyTypes.py` (Python name → C++ type + header).
+2. Add a row to `CTHREADS_INTERNAL_TYPES` in `pyTypes.py` (Python name -> C++ type + header).
 3. If it has methods, add a resolver + table next to `syncBindingTranslators` / `linalgTranslations`, and one more `if` in `call.py` **before** the final “unsupported call” error.
 4. Tests: dummy class with `__cthreads_internal__` is enough for translation tests; live pybind tests belong under `tests/unit/...` for the binding itself.
 
@@ -1538,10 +1538,10 @@ Helpers: `make_ctx(symbols=..., owner_name=..., globals_extra=...)` builds a fak
         ▼
     compile()         (first thread() or explicit api.compile)
         │
-        ├── Threadable.compile  →  struct + methods on disk
+        ├── Threadable.compile  ->  struct + methods on disk
         └── translate_thread
                 │
-                ├── signature  →  C++ params + name table
+                ├── signature  ->  C++ params + name table
                 └── body walk
                       ├── translate_stmt / translate_expr
                       ├── typeof(receiver) for methods

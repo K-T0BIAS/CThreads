@@ -18,7 +18,7 @@ dist/
 .cthreads_cache.json
 .pytest_cache/
 
-# CMake / MSVC litter — must never land in the source tree
+# CMake / MSVC litter - must never land in the source tree
 src/cthreads/cpp/CMakeCache.txt
 src/cthreads/cpp/CMakeFiles/
 src/cthreads/cpp/CMakeInit.txt

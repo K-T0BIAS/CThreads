@@ -1,4 +1,4 @@
-"""prepare / thread load policy — no auto-unload under concurrency."""
+"""prepare / thread load policy - no auto-unload under concurrency."""
 
 from __future__ import annotations
 

@@ -101,8 +101,8 @@ Apple Silicon and Intel both work; the same C++17 + CMake flow applies.
 
 ## What gets built
 
-1. **`pip install -e .`** — CMake configures `src/cthreads/cpp`, compiles `cthreads._ext` (Release, C++17). The module is copied next to the Python package so editable imports work (including on Windows).
-2. **First `cthreads.thread(...)`** (or `prepare()` + `load_kernels()`) — codegen emits C++ for your `@Thread` / `@Threadable` types and links `cthreads_kernels` with `cl` / `g++` / `clang++`. Later launches reuse the cache until the annotated source changes.
+1. **`pip install -e .`** - CMake configures `src/cthreads/cpp`, compiles `cthreads._ext` (Release, C++17). The module is copied next to the Python package so editable imports work (including on Windows).
+2. **First `cthreads.thread(...)`** (or `prepare()` + `load_kernels()`) - codegen emits C++ for your `@Thread` / `@Threadable` types and links `cthreads_kernels` with `cl` / `g++` / `clang++`. Later launches reuse the cache until the annotated source changes.
 
 The linalg extension is compiled with **AVX2** (`/arch:AVX2` on MSVC, `-mavx2 -mfma` elsewhere). That matches current x86_64 machines; very old CPUs without AVX2 are not a supported `_ext` target.
 
@@ -138,6 +138,6 @@ Wheels and the sdist are built on GitHub Actions. You do not need a Linux deskto
 
 ## Next
 
-- [README](../README.md) — `@Thread` / `@Threadable` and first `thread(...)` / `join` / `await`
-- [concepts](./concepts.md) — GIL, pack / writeback, rules
-- [Guides](./index.md) — pools, sync, jobs, math
+- [README](../README.md) - `@Thread` / `@Threadable` and first `thread(...)` / `join` / `await`
+- [concepts](./concepts.md) - GIL, pack / writeback, rules
+- [Guides](./index.md) - pools, sync, jobs, math

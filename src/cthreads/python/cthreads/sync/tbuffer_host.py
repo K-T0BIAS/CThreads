@@ -1,8 +1,8 @@
 """
-Host-side opaque handles for ``TBuffer[Threadable]``.
+Host-side opaque handles for `TBuffer[Threadable]`.
 
-Allocation lives in ``kernels.dll`` (``cthreads_create_tbuffer``). ``_ext`` /
-marshal only pass the ``void*`` through to typed kernel params.
+Allocation lives in `kernels.dll` (`cthreads_create_tbuffer`). `_ext` /
+marshal only pass the `void*` through to typed kernel params.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 
 class TBufferHandle:
-    """Opaque host handle to ``tripple_buffer<Threadable>`` in ``kernels.dll``."""
+    """Opaque host handle to `tripple_buffer<Threadable>` in `kernels.dll`."""
 
     __slots__ = ("type_name", "ptr", "_destroyed")
 
@@ -39,10 +39,10 @@ class TBufferHandle:
 
 def create_tbuffer(threadable_cls: type, capacity: int) -> TBufferHandle:
     """
-    Allocate ``tripple_buffer<Threadable>`` in the loaded kernel library.
+    Allocate `tripple_buffer<Threadable>` in the loaded kernel library.
 
-    Requires ``compile()`` + ``build()`` + ``load_kernels()`` so
-    ``cthreads_create_tbuffer`` exists for that Threadable type.
+    Requires `compile()` + `build()` + `load_kernels()` so
+    `cthreads_create_tbuffer` exists for that Threadable type.
     """
     if capacity <= 0:
         raise ValueError("capacity must be positive")
@@ -70,7 +70,7 @@ def create_tbuffer(threadable_cls: type, capacity: int) -> TBufferHandle:
 
 
 def destroy_tbuffer(handle: TBufferHandle) -> None:
-    """Free a handle allocated by ``create_tbuffer``."""
+    """Free a handle allocated by `create_tbuffer`."""
     if handle._destroyed or not handle.ptr:
         return
 

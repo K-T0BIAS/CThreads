@@ -1,5 +1,5 @@
 """
-`cthreads.math` → `cthreads::math::*` + quoted `math/*.hpp` includes.
+`cthreads.math` -> `cthreads::math::*` + quoted `math/*.hpp` includes.
 
 Handles:
   cthreads.math.abs(x) / from cthreads.math import abs; abs(x)
@@ -20,7 +20,7 @@ from ..base import CallPlugin, TranslateExpr
 class _CthreadsMathOp(NamedTuple):
     cpp_func: str
     arity: int
-    cpp_include: str  # e.g. math/abs.hpp → #include "math/abs.hpp"
+    cpp_include: str  # e.g. math/abs.hpp -> #include "math/abs.hpp"
 
 
 CTHREADS_MATHOPS: dict[str, _CthreadsMathOp] = {

@@ -1,4 +1,4 @@
-"""``linalg.Shape`` bindings."""
+"""`linalg.Shape` bindings."""
 
 from __future__ import annotations
 

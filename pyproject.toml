@@ -6,11 +6,12 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [project]
+readme = "ReadMe.md"
 name = "cthreads"
 version = "0.1.0"
 description = "Compile @Threadable / @Thread Python into native C++ kernels and run them off the GIL."
 requires-python = ">=3.10"
-keywords = ["threading", "codegen", "cpp", "pybind11"]
+keywords = ["threading", "multithreading", "codegen", "python compiler", "cpp", "pybind11"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -25,6 +26,14 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/K-T0BIAS/CThreads"
+Repository = "https://github.com/K-T0BIAS/CThreads"
+Issues = "https://github.com/K-T0BIAS/CThreads/issues"
+Documentation = "https://github.com/K-T0BIAS/CThreads/tree/main/docs"
+
+
+
 [project.optional-dependencies]
 test = ["pytest>=8"]
 dev = ["pytest>=8", "build", "scikit-build-core>=0.10"]
@@ -33,7 +42,7 @@ dev = ["pytest>=8", "build", "scikit-build-core>=0.10"]
 minimum-version = "0.10"
 cmake.source-dir = "src/cthreads/cpp"
 cmake.build-type = "Release"
-# Persistent out-of-tree build — never use editable.mode=inplace with
+# Persistent out-of-tree build - never use editable.mode=inplace with
 # cmake.source-dir pointing at cpp/ (that dumps MSVC/CMake litter into sources).
 build-dir = "build/{wheel_tag}"
 wheel.packages = [

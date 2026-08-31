@@ -8,7 +8,7 @@ Related APIs:
 
 | API | Where | Role |
 |-----|--------|------|
-| `__sync_state()` | Inside `@Thread` bodies only | Kernel barrier → writeback via `_ext` |
+| `__sync_state()` | Inside `@Thread` bodies only | Kernel barrier -> writeback via `_ext` |
 | `job.sync_state()` | Host Python | Same writeback, driven from outside the kernel |
 | `cthreads.sync_state(job)` | Host Python | Alias for `job.sync_state()` |
 
@@ -34,7 +34,7 @@ Python args  ──pack (copy)──►  C++ args struct ("the pack")
 Important consequences:
 
 1. **Two worlds.** During the job, Python and C++ are separate. Sync copies
-   C++ → Python; it does not share memory with live Python objects mid-run.
+   C++ -> Python; it does not share memory with live Python objects mid-run.
 2. **Writeback targets job args only.** Sync updates the Python objects that
    were passed into `spawn` / `thread`, not parent containers, slices’ parents,
    or other aliases.
@@ -84,7 +84,7 @@ from cthreads import Thread, __sync_state, spawn, sync_state
 @Thread
 def flock_continuous(boids: list[Boid], dt: float) -> None:
     # ... mutate boids in the pack ...
-    __sync_state()   # copy pack → Python args so the host can read mid-run
+    __sync_state()   # copy pack -> Python args so the host can read mid-run
 ```
 
 Line-by-line:
@@ -98,7 +98,7 @@ Line-by-line:
 Calling `__sync_state()` from ordinary Python (outside `@Thread`) raises:
 
 ```python
-# cthreads/__init__.py — stub only
+# cthreads/__init__.py - stub only
 def __sync_state() -> None:
     raise RuntimeError(
         "cthreads.__sync_state() is only valid inside @Thread bodies "
@@ -118,7 +118,7 @@ job = spawn(flock_continuous, state.boids, dt)
 job.start()
 while not job.done():
     sync_state(job)          # or job.sync_state()
-    # read state.boids — same list object passed to spawn
+    # read state.boids - same list object passed to spawn
     draw(state.boids)
 job.join()
 ```
@@ -127,7 +127,7 @@ job.join()
 |------|---------|
 | `spawn(..., state.boids, dt)` | Packs a **copy** of `state.boids` into C++. Keeps the Python list as the writeback target. |
 | `job.start()` | Worker runs; must start before host sync. |
-| `sync_state(job)` | Steals the job mutex, takes GIL, writebacks pack → args. Does **not** use kernel TLS. |
+| `sync_state(job)` | Steals the job mutex, takes GIL, writebacks pack -> args. Does **not** use kernel TLS. |
 | `draw(state.boids)` | Sees updates only if pack was actually mutated (by-ref) and writeback ran. |
 | `job.join()` | Final writeback also runs when the kernel finishes (even without mid-run sync). |
 
@@ -172,7 +172,7 @@ def sync_state(job: Job) -> None:
 
 ---
 
-## 4. Codegen: Python call → C++ call
+## 4. Codegen: Python call -> C++ call
 
 Detection lives in `AstTranslators/call.py` (builtin, like `len`):
 
@@ -227,7 +227,7 @@ void __sync_state() {                   // (3)
 
 Concurrent jobs: every worker dials the **same** function address. Which job is current is decided by **TLS inside `_ext`**, not by this pointer.
 
-Header `sync/syncState.hpp` only declares `__sync_state()` and defines `JobContext`. It must **not** contain `inline thread_local` — that was the dual-fridge bug (each DLL got its own TLS slot).
+Header `sync/syncState.hpp` only declares `__sync_state()` and defines `JobContext`. It must **not** contain `inline thread_local` - that was the dual-fridge bug (each DLL got its own TLS slot).
 
 ---
 
@@ -335,7 +335,7 @@ void job_do_writeback(JobContext* ctx) {
 |------|---------|
 | Lock `state_mu` | Serialize with host `sync_state` and final writeback. |
 | Acquire GIL | Need Python for marshal. |
-| `writeback_params` | Imports `cthreads.marshal` and copies pack → Python args. |
+| `writeback_params` | Imports `cthreads.marshal` and copies pack -> Python args. |
 
 Lock order is always **mutex then GIL** (never reverse) to avoid deadlock.
 
@@ -365,10 +365,10 @@ Same end effect as kernel `__sync_state()`; different entry door.
 ```text
 [kernel]  cthreads::detail::__sync_state()
               │
-              │  g_ext_sync_state()          // fn ptr → _ext
+              │  g_ext_sync_state()          // fn ptr -> _ext
               ▼
 [_ext]    cthreads_ext_sync_state()
-              │  g_job (TLS) → do_writeback
+              │  g_job (TLS) -> do_writeback
               ▼
 [_ext]    job_do_writeback(ctx)
               │  mutex + GIL
@@ -383,7 +383,7 @@ Same end effect as kernel `__sync_state()`; different entry door.
 
 ## 7. Prerequisite: mutables by reference (pack must actually change)
 
-Sync only copies **whatever is in the pack**. If the kernel received lists/dicts **by value**, it mutated a temporary and the pack stayed stale — sync correctly copied garbage/old data.
+Sync only copies **whatever is in the pack**. If the kernel received lists/dicts **by value**, it mutated a temporary and the pack stayed stale - sync correctly copied garbage/old data.
 
 Codegen now emits references for mutables:
 
@@ -413,7 +413,7 @@ This is separate from sync, but **without it mid-run sync looks broken**.
 |-----------|-------------------|
 | `spawn(fn, state.boids)` + sync | Updates `state.boids` (the arg object). |
 | `owned = state.boids[a:b]` then `spawn(fn, owned)` + sync | Updates **`owned` only**, not `state.boids`. |
-| Two jobs, same Python list, each mutates a range in its **private pack** | Each writeback replaces the **whole** list from that pack; last finish wins — not a merge. |
+| Two jobs, same Python list, each mutates a range in its **private pack** | Each writeback replaces the **whole** list from that pack; last finish wins - not a merge. |
 | Host holds `b = state.boids[0]` across sync | List writeback may rebuild elements; `b` can be a stale instance. Prefer reading through the arg list after sync. |
 
 Design intent: **arg-rooted full writeback** is simple and predictable. Shared-memory / ranged merge is a future feature, not what sync does today.
@@ -431,20 +431,20 @@ load_kernels(path)
   └─ cthreads_bind_sync_state(&cthreads_ext_sync_state)
 
 spawn / thread(fn, args...)
-  └─ pack Python → C++ pack
+  └─ pack Python -> C++ pack
   └─ keep Python arg objects on the Job
 
 worker start
   └─ JobContext on stack; set_job_context(&ctx)
   └─ call_fn(pack)
         └─ ... kernel work ...
-        └─ __sync_state()  → bridge → _ext TLS → writeback
+        └─ __sync_state()  -> bridge -> _ext TLS -> writeback
         └─ ... more work ...
   └─ clear TLS
   └─ final writeback + free pack + finished = true
 
 host (any time while running)
-  └─ job.sync_state() → mutex + GIL + writeback (no TLS)
+  └─ job.sync_state() -> mutex + GIL + writeback (no TLS)
 ```
 
 ---
@@ -453,7 +453,7 @@ host (any time while running)
 
 **Link kernels to `_ext`:** possible in theory, painful in practice (`.pyd` as import lib, venv paths, toolchains). TLS still must live in one DLL only.
 
-**Translator emits full writeback:** needs Python/GIL/job metadata inside every kernel build → mini-`_ext` per project, or binding many data handlers instead of one function pointer.
+**Translator emits full writeback:** needs Python/GIL/job metadata inside every kernel build -> mini-`_ext` per project, or binding many data handlers instead of one function pointer.
 
 **Best fit for this architecture:** thin codegen call + `sync_bridge` doorbell + `_ext` owns TLS and writeback.
 
@@ -463,7 +463,7 @@ host (any time while running)
 
 | Symptom | Likely cause |
 |---------|----------------|
-| UI / Python never moves; final join also stale | Pack not mutated → check by-ref signatures / rebuild kernels |
+| UI / Python never moves; final join also stale | Pack not mutated -> check by-ref signatures / rebuild kernels |
 | Host `sync_state` updates, in-kernel `__sync_state` does nothing | Bridge not bound (old DLL) or `load_kernels` skipped |
 | `_debug_ext_sync_invocations` stays 0 | Kernel never entered `cthreads_ext_sync_state` (bind / emit / call path) |
 | `LoadLibrary` error 4551 on Windows | Smart App Control blocking unsigned DLL (often under `%TEMP%`) |
@@ -480,7 +480,7 @@ Test helper (extension): `_ext._debug_ext_sync_invocations` / `_debug_reset_ext_
 | `src/cthreads/python/cthreads/__init__.py` | `__sync_state` stub; re-exports `sync_state` |
 | `src/cthreads/python/cthreads/job.py` | `Job.sync_state`, `sync_state(job)` |
 | `src/cthreads/python/cthreads/pyOps.py` | `__sync_state` in `BUILTINS` |
-| `.../AstTranslators/call.py` | Lowers `__sync_state()` → C++ call |
+| `.../AstTranslators/call.py` | Lowers `__sync_state()` -> C++ call |
 | `.../AstTranslators/signature.py` | Mutable params as `T&` |
 | `.../kernel_meta.py` | `pass_as="ref"` for mutables |
 | `.../build.py` | Always compiles `sync_bridge.cpp` into kernel DLL |
@@ -503,7 +503,7 @@ def pulse(xs: list[int]) -> None:
     xs.append(1)
     __sync_state()          # Python xs should become [1] here
     # ... more work ...
-    xs.append(2)            # final join writeback → [1, 2]
+    xs.append(2)            # final join writeback -> [1, 2]
 
 xs: list[int] = []
 job = spawn(pulse, xs)

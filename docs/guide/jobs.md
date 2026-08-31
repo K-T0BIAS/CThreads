@@ -54,7 +54,7 @@ stateDiagram-v2
 | `await job` | Auto-start if needed. Wait **without** blocking the asyncio event loop. Returns `job.result()`. |
 | `job.wait()` | Block until done (condition wait). Prefer `join()` so the thread is reaped. |
 | `job.result()` | Return value of the `@Thread` function (`None` if `-> None`). Call after `join`, or use `await job`. |
-| `job.sync_state()` | Mid-run pack → Python writeback. Job must already be **started**. No-op once finished. |
+| `job.sync_state()` | Mid-run pack -> Python writeback. Job must already be **started**. No-op once finished. |
 
 `print(job)` shows `pending`, `running`, or `done`.
 
@@ -83,7 +83,7 @@ Scalars such as `int` / `float` are not updated in-place on the host; return the
 
 # Mid-run state (`sync_state`)
 
-For a long job (simulation, render loop) the host can copy pack → Python **before** `join`:
+For a long job (simulation, render loop) the host can copy pack -> Python **before** `join`:
 
 | API | Who calls it | When to use |
 |---|---|---|
@@ -162,7 +162,7 @@ Kernel-driven alternative: call `__sync_state()` inside `move` / `sim` at a safe
 
 Signature: `thread(fn, *args, force=False, **kwargs) -> Job`. Keyword args bind by parameter name.
 
-`force=True` rebuilds kernels. If a library is already loaded, that raises — call `unload_kernels()` first (required on Windows before relinking the DLL).
+`force=True` rebuilds kernels. If a library is already loaded, that raises - call `unload_kernels()` first (required on Windows before relinking the DLL).
 
 Many jobs at once: see [pools](./pools.md).
 

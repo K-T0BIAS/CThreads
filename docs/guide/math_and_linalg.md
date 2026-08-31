@@ -43,7 +43,7 @@ def force(x: float, y: float) -> float:
 
 a = ArrayF32.from_list([[1.0, 2.0], [3.0, 4.0]])
 b = ArrayF32.from_list([[5.0, 6.0], [7.0, 8.0]])
-c = a.matmul(b)          # host, serial GEMM
+c = a.matmul(b)                 # host, serial GEMM
 c = a.matmul(b, parallel=True)  # host only; large M*N*K
 
 job = thread(force, 3.0, 4.0)
@@ -111,9 +111,9 @@ RNG is `thread_local` (`std::mt19937`). Parallel jobs do not share state. `seed(
 ```python
 from cthreads import linalg
 
-a = linalg.ArrayF32([2, 3])          # zeros, C-contiguous, shape (2, 3)
+a = linalg.ArrayF32([2, 3]) # zeros, C-contiguous, shape (2, 3)
 b = linalg.ArrayF32.from_list([[1.0, 2.0], [3.0, 4.0]])
-print(b.shape, b.ndim, b.numel, b.strides, b.offset)  # host: shape/strides are lists
+print(b.shape, b.ndim, b.numel, b.strides, b.offset) # host: shape/strides are lists
 nested = b.to_list()
 ```
 
@@ -298,7 +298,7 @@ Heavy-suite wall-clock comparison (`out.csv`): best-of-11, speedup = NumPy ms ÷
 
 **Strong:** row-wise dot, batched cross, mask select/count/fill.  
 **Close:** contiguous ewise / compare (AVX paths in the same league as NumPy).  
-**Matmul:** default `a.matmul(b)` stays single-threaded so it does not fight the thread pool (~0.10× vs vendor BLAS on large squares). Opt in with `a.matmul(b, parallel=True)` to panel-parallelize large GEMMs (`M*N*K` above ~67e6, using ~80% of hardware threads) — typically ~4–5× faster than serial and about half of NumPy/OpenBLAS on the heavy 2D shapes below.
+**Matmul:** default `a.matmul(b)` stays single-threaded so it does not fight the thread pool (~0.10× vs vendor BLAS on large squares). Opt in with `a.matmul(b, parallel=True)` to panel-parallelize large GEMMs (`M*N*K` above ~67e6, using ~80% of hardware threads) - typically ~4–5× faster than serial and about half of NumPy/OpenBLAS on the heavy 2D shapes below.
 
 ### Matmul serial vs `parallel=True` (heavy suite)
 

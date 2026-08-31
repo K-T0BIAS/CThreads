@@ -158,7 +158,7 @@ def test_shared_parallel_two_workers_same_index(shared_kernels):
 
 @_INTEGRATION
 def test_ref_parallel_two_workers_does_not_double_bump(shared_kernels):
-    """Contrast: ref params use per-job pack copies — not cooperative native sharing."""
+    """Contrast: ref params use per-job pack copies - not cooperative native sharing."""
     from cthreads import thread
 
     xs = [0]

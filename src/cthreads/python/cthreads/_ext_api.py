@@ -13,7 +13,7 @@ except ImportError:
 def _require_ext():
     if _ext is None:
         raise RuntimeError(
-            "cthreads._ext is not available — build/install the native extension"
+            "cthreads._ext is not available - build/install the native extension"
         )
     return _ext
 

@@ -64,7 +64,7 @@ void bind_sync_state_to_kernels() {
     }
     void* p = cthreads::kernels().sym("cthreads_bind_sync_state");
     if (!p) {
-        return; // older kernel DLL without bridge — __sync_state no-ops
+        return; // older kernel DLL without bridge - __sync_state no-ops
     }
     using BindFn = void (*)(void (*)());
     reinterpret_cast<BindFn>(p)(&cthreads_ext_sync_state);
@@ -242,7 +242,7 @@ void fill_pack_from_values(
     py::dict schemas           // ^^^^
 ) {
     // Pack/unpack lives in the public Python marshal module (V2 promoted to
-    // cthreads.marshal — same path the extension has always imported).
+    // cthreads.marshal - same path the extension has always imported).
     py::module_ marshal = py::module_::import("cthreads.marshal");
     // call the pack_params function from the marshall module
     // this function walks all the trampoline setters for each param and calls them with the arg values
@@ -296,7 +296,7 @@ void writeback_params(
 
 /**
  * Extension-side writeback used by kernel `__sync_state()` (via TLS JobContext).
- * Lock order: state_mu first, then GIL (never reverse — avoids deadlock).
+ * Lock order: state_mu first, then GIL (never reverse - avoids deadlock).
  */
 void job_do_writeback(cthreads::detail::JobContext* ctx) {
     if (!ctx || !ctx->state_mu || !ctx->pack) {
@@ -448,7 +448,7 @@ using KernelCallFn = void (*)(void*);
 Build the runnable body for one SpawnedKernel (call + writeback + free pack).
 
 Same function is used by the dedicated CThread path and (later) pool.submit.
-``self`` must outlive the run (Python Job owns the SpawnedKernel).
+`self` must outlive the run (Python Job owns the SpawnedKernel).
 */
 std::function<void()> make_kernel_job(
     SpawnedKernel* self,
@@ -521,7 +521,7 @@ Returns:
 - std::shared_ptr<SpawnedKernel> = the spawned kernel object
 
 Example __kernel_meta__:
-```json
+``json
 {
     "symbol": "move", # the name of the function
     "call_symbol": "move__call", # the name of the function in the c++ translation
@@ -566,7 +566,7 @@ Example __kernel_meta__:
         ],
         },
     },
-}```
+}``
 */
 std::shared_ptr<SpawnedKernel> spawn_from_meta(
     py::dict meta,
@@ -935,7 +935,7 @@ PYBIND11_MODULE(_ext, m) {
             }
             if (!py::hasattr(fn, "__kernel_meta__")) {
                 throw std::runtime_error(
-                    "cthreads.thread: missing __kernel_meta__ — call cthreads.compile() first"
+                    "cthreads.thread: missing __kernel_meta__ - call cthreads.compile() first"
                 );
             }
             py::dict meta = fn.attr("__kernel_meta__").cast<py::dict>();
@@ -1173,7 +1173,7 @@ PYBIND11_MODULE(_ext, m) {
         });
     tbuf_obj.attr("__cthreads_internal__") = true;
 
-    // cthreads.math — helpers not in stdlib math (abs/min/max/clamp/RNG).
+    // cthreads.math - helpers not in stdlib math (abs/min/max/clamp/RNG).
     // Mark the *module* with __cthreads_internal__ (pybind bound functions are
     // builtins and cannot carry arbitrary attrs). Call lowering checks the
     // module / __module__ and emits cthreads::math::* + #include "math/*.hpp".

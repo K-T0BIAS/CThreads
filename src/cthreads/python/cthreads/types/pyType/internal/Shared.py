@@ -54,7 +54,7 @@ def is_shared_pytype(py_type: PyType) -> bool:
 
 
 def peel_shared(py_type: PyType) -> PyType:
-    """Unwrap ``Shared[inner]`` for type-directed lowering (one level)."""
+    """Unwrap `Shared[inner]` for type-directed lowering (one level)."""
     if isinstance(py_type, PyShared):
         return py_type.inner_type
     return py_type

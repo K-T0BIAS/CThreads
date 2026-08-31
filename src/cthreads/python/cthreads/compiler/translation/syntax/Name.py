@@ -4,7 +4,7 @@ from ..context import TranslationContext
 
 
 class Name:
-    """ast.Name — locals / params. Method `self` lowers to `(*this)`."""
+    """ast.Name - locals / params. Method `self` lowers to `(*this)`."""
 
     @staticmethod
     def name(node: ast.Name, ctx: TranslationContext) -> str:

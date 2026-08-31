@@ -14,7 +14,7 @@ namespace cthreads::detail {
  * Owned and TLS-stored only inside the `_ext` module (see module.cpp).
  * Generated kernels call `cthreads::detail::__sync_state()`, which is
  * implemented in the kernel DLL bridge (`sync_bridge.cpp`) as a call into
- * `_ext`'s bound entry — so every worker reads the same per-thread notebook.
+ * `_ext`'s bound entry - so every worker reads the same per-thread notebook.
  *
  * Opaque void* fields avoid pulling pybind11 into kernel-compiled code.
  */
@@ -34,7 +34,7 @@ struct JobContext {
 /**
  * Kernel barrier: mirror C++ pack Threadable/list/dict state into Python.
  * Codegen for bare `__sync_state()` emits this call.
- * Defined in the kernel shared library (sync_bridge.cpp), not inline here —
+ * Defined in the kernel shared library (sync_bridge.cpp), not inline here -
  * an inline/TLS copy in this header would be a separate slot per DLL.
  */
 void __sync_state();

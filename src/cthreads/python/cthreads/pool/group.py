@@ -1,4 +1,4 @@
-"""Awaitable group of ``cthreads.Job`` handles."""
+"""Awaitable group of `cthreads.Job` handles."""
 
 from __future__ import annotations
 

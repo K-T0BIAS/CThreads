@@ -1,5 +1,5 @@
 """
-Syntax — AST node dispatch for @Thread bodies.
+Syntax - AST node dispatch for @Thread bodies.
 
 Area static classes (call as Syntax.expr / Literal.constant / Op.bin_op / …):
   Literal  Constant, List
@@ -31,7 +31,7 @@ StmtHandler = Callable[[ast.AST, TranslationContext], list[str]]
 
 
 class Syntax:
-    """Dispatcher: Syntax.expr / Syntax.stmt → area static methods."""
+    """Dispatcher: Syntax.expr / Syntax.stmt -> area static methods."""
 
     _EXPR: dict[type, ExprHandler] = {
         ast.Constant: Literal.constant,

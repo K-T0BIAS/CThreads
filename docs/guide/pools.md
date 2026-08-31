@@ -14,7 +14,7 @@ def add(a: int, b: int) -> int:
 pool = ThreadPool(4).start()
 try:
     job = pool.submit(add, 1, 2)
-    print(job.result())  # 3 — already queued; join/await as for any Job
+    print(job.result())  # 3 - already queued; join/await as for any Job
 
     group = pool.group(add, [(1, 2), (3, 4), (5, 6)])
     print(group.results())  # [3, 7, 11]
@@ -115,7 +115,7 @@ Each `ThreadPool` owns one SharedHost. Jobs submitted to that pool that take `Sh
 |---------|----------------------------------------|
 | `pool.group(fn, items)` | Yes (batched pin) |
 | `with pool.submit_queue():` + `submit` | Yes (explicit pin) |
-| Loop of bare `pool.submit(...)` | No — early unregister can free the host mid-wave |
+| Loop of bare `pool.submit(...)` | No - early unregister can free the host mid-wave |
 
 Different pools do **not** share one host. Passing the same Python list into two pools does not make them cooperative with each other.
 
@@ -131,6 +131,6 @@ If the pending queue is already at the limit, `submit` / `group` raise. Use this
 
 # See also
 
-- [Jobs](./jobs.md) — `Job` lifecycle, `join` / `await`, writeback
-- [Marshal and module](./marshal_and_module.md) — SharedHost, promote / demote
-- [Sync](./sync.md) — locks and events inside kernels
+- [Jobs](./jobs.md) - `Job` lifecycle, `join` / `await`, writeback
+- [Marshal and module](./marshal_and_module.md) - SharedHost, promote / demote
+- [Sync](./sync.md) - locks and events inside kernels

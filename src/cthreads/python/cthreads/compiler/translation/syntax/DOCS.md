@@ -1,6 +1,6 @@
 # V2 Syntax
 
-AST lowering for `@Thread` **bodies**: Python language constructs → C++ expression strings or statement lines.
+AST lowering for `@Thread` **bodies**: Python language constructs -> C++ expression strings or statement lines.
 
 Parent overview and signature / context / includes: [`../DOCS.md`](../DOCS.md).
 
@@ -31,7 +31,7 @@ Helpers used from the parent package:
 
 ---
 
-## `Syntax` — dispatcher
+## `Syntax` - dispatcher
 
 ### `Syntax.expr(node, ctx) -> str`
 
@@ -48,8 +48,8 @@ Looks up `type(node)` in `_EXPR` and runs the handler.
 | `ast.BoolOp` | [`Op.bool_op`](#opbool_op) |
 | `ast.List` | [`Literal.list_display`](#literallist_display) |
 
-Unknown expression → `TypeError`.  
-`ast.Call` / `ast.Attribute` → see [Not wired](#not-wired-call--attribute).
+Unknown expression -> `TypeError`.  
+`ast.Call` / `ast.Attribute` -> see [Not wired](#not-wired-call--attribute).
 
 ### `Syntax.stmt(node, ctx) -> list[str]`
 
@@ -69,7 +69,7 @@ Looks up `type(node)` in `_STMT`. Returns a **list of C++ lines** (usually alrea
 | `ast.Break` | [`Flow.break_stmt`](#flowbreak_stmt) |
 | `ast.Continue` | [`Flow.continue_stmt`](#flowcontinue_stmt) |
 
-Unknown statement → `[f"    // unsupported statement: {TypeName}"]` (does not raise).
+Unknown statement -> `[f"    // unsupported statement: {TypeName}"]` (does not raise).
 
 Handlers call back into `Syntax.expr` / `Syntax.stmt` for nested nodes (lazy import to avoid cycles).
 
@@ -128,7 +128,7 @@ Rules:
 
 ### `Literal._elem_cpp_type` (internal)
 
-Infers one element’s C++ type string for list displays; `None` if unknown (e.g. call / binop — those need an annotated assignment for empty/untyped lists).
+Infers one element’s C++ type string for list displays; `None` if unknown (e.g. call / binop - those need an annotated assignment for empty/untyped lists).
 
 ---
 
@@ -209,7 +209,7 @@ Chained comparisons follow Python pairwise semantics joined with `&&`.
 | `a and b` | `(a && b)` |
 | `a or b or c` | `(a \|\| b \|\| c)` |
 
-Requires at least two values. Note: Python `and`/`or` return an operand; C++ yields bool — fine for conditions in this subset.
+Requires at least two values. Note: Python `and`/`or` return an operand; C++ yields bool - fine for conditions in this subset.
 
 ---
 
@@ -229,8 +229,8 @@ Rules:
 
 - Target must be a plain `Name` (not attribute / subscript).
 - No redeclaration if name already in `ctx.symbols`.
-- Annotation via [`Source.resolve_annotation`](../DOCS.md#sourcepy) → `hint_to_pytype`.
-- Registers type in `ctx.symbols`; [`include_for`](../DOCS.md#includepy) → `body_includes`.
+- Annotation via [`Source.resolve_annotation`](../DOCS.md#sourcepy) -> `hint_to_pytype`.
+- Registers type in `ctx.symbols`; [`include_for`](../DOCS.md#includepy) -> `body_includes`.
 - RHS via [`Syntax.expr`](#syntaxexpr--syntaxstmt); uses `PyType.to_cpp`.
 
 ### `Assign.assign`
@@ -242,7 +242,7 @@ Rules:
 |--------|--------|
 | `n = n + i` | name must already be in `symbols` |
 | `xs[i] = v` | LHS via [`Index.subscript`](#indexsubscript) |
-| `p.x = v` | needs Attribute plugin — fails today |
+| `p.x = v` | needs Attribute plugin - fails today |
 | `a = b = 0` | multi-target not supported |
 
 New locals must use AnnAssign (`x: int = …`), not bare Assign.
@@ -356,8 +356,8 @@ Value via [`Syntax.expr`](#syntaxexpr--syntaxstmt).
 
 | Case | Behavior |
 |------|----------|
-| Docstring `Expr(Constant(str))` | ignored → `[]` |
-| `Expr(Call(...))` | `    <expr>;` via [`Syntax.expr`](#syntaxexpr--syntaxstmt) — **needs Call plugin** |
+| Docstring `Expr(Constant(str))` | ignored -> `[]` |
+| `Expr(Call(...))` | `    <expr>;` via [`Syntax.expr`](#syntaxexpr--syntaxstmt) - **needs Call plugin** |
 | other | comment line `// unsupported statement: Expr (…)` |
 
 ---
@@ -376,7 +376,7 @@ Value via [`Syntax.expr`](#syntaxexpr--syntaxstmt).
 | `xs[1:3]` | error (slices not supported) |
 
 Base and index via [`Syntax.expr`](#syntaxexpr--syntaxstmt).  
-Typing of `xs[i]` as an *expression type* is [`Typeof.of`](../DOCS.md#typeofpy) (list → `inner_type`); Index itself only emits text.
+Typing of `xs[i]` as an *expression type* is [`Typeof.of`](../DOCS.md#typeofpy) (list -> `inner_type`); Index itself only emits text.
 
 ---
 
@@ -390,8 +390,8 @@ Syntax.stmt(AnnAssign)
        ├─ Source.resolve_annotation(int)
        └─ Syntax.expr(BinOp)
             └─ Op.bin_op
-                 ├─ Syntax.expr(Constant 2) → Literal.constant → Cpp.literal
-                 └─ Syntax.expr(Constant 3) → Literal.constant → Cpp.literal
+                 ├─ Syntax.expr(Constant 2) -> Literal.constant -> Cpp.literal
+                 └─ Syntax.expr(Constant 3) -> Literal.constant -> Cpp.literal
 ```
 
 Typical tree for `if n > 0: n = n + i`:
@@ -399,12 +399,12 @@ Typical tree for `if n > 0: n = n + i`:
 ```text
 Syntax.stmt(If)
   └─ Flow.if_stmt
-       ├─ Syntax.expr(Compare) → Op.compare
-       │    ├─ Syntax.expr(Name n) → Name.name
+       ├─ Syntax.expr(Compare) -> Op.compare
+       │    ├─ Syntax.expr(Name n) -> Name.name
        │    └─ Syntax.expr(Constant 0)
-       └─ Syntax.stmt(Assign) → Assign.assign
+       └─ Syntax.stmt(Assign) -> Assign.assign
             ├─ Syntax.expr(Name n)
-            └─ Syntax.expr(BinOp) → Op.bin_op
+            └─ Syntax.expr(BinOp) -> Op.bin_op
                  ├─ Name.name("n")
                  └─ Name.name("i")
 ```

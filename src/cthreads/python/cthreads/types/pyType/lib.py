@@ -61,7 +61,7 @@ def hint_to_pytype(hint: Any) -> PyType:
             raise TypeError("Shared[...] requires an element type annotation")
         return PyShared(hint_to_pytype(inner_hint))
 
-    # TBuffer[inner] — codegen uses tripple_buffer<inner_cpp> in the kernel.
+    # TBuffer[inner] - codegen uses tripple_buffer<inner_cpp> in the kernel.
     if getattr(hint, "__cthreads_tbuffer__", False):
         inner_hint = getattr(hint, "__cthreads_tbuffer_inner__", None)
         if inner_hint is None:
@@ -86,7 +86,7 @@ def hint_to_pytype(hint: Any) -> PyType:
             extra_includes=tuple(entry.get("extra_includes", ())),
         )
 
-    # @Threadable class — name only; emit looks up the unit's hpp_path
+    # @Threadable class - name only; emit looks up the unit's hpp_path
     if isinstance(hint, type) and getattr(hint, "__threadable", False):
         return PyThreadable(hint.__name__)
 

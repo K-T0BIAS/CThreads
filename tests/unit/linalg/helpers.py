@@ -1,4 +1,4 @@
-"""Shared helpers for ``cthreads.linalg`` runtime tests."""
+"""Shared helpers for `cthreads.linalg` runtime tests."""
 
 from __future__ import annotations
 

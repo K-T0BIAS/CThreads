@@ -1,8 +1,8 @@
 """
-cthreads.pool.threadPool — fixed thread pools that run @Thread jobs.
+cthreads.pool.threadPool - fixed thread pools that run @Thread jobs.
 
-Dedicated ``cthreads.thread()`` (one OS thread per Job) is unchanged.
-Use a pool when you want a bounded worker set and ``pool.submit(fn, ...)``.
+Dedicated `cthreads.thread()` (one OS thread per Job) is unchanged.
+Use a pool when you want a bounded worker set and `pool.submit(fn, ...)`.
 
     from cthreads import ThreadPool
 
@@ -36,7 +36,7 @@ _NativeThreadPool = getattr(_native, "ThreadPool", None) if _native is not None 
 
 
 class ThreadPool:
-    """Fixed-capacity pool; wraps ``cthreads._ext.pool.ThreadPool``."""
+    """Fixed-capacity pool; wraps `cthreads._ext.pool.ThreadPool`."""
 
     __slots__ = ("_raw",)
 
@@ -47,7 +47,7 @@ class ThreadPool:
     ) -> None:
         if _NativeThreadPool is None:
             raise RuntimeError(
-                "cthreads.ThreadPool: native extension not available — "
+                "cthreads.ThreadPool: native extension not available - "
                 "build/install cthreads._ext"
             )
         lim = -1 if queue_limit is None else int(queue_limit)
@@ -59,7 +59,7 @@ class ThreadPool:
 
     @property
     def queue_limit(self) -> int:
-        """Max pending queued tasks; ``-1`` means unlimited."""
+        """Max pending queued tasks; `-1` means unlimited."""
         return int(self._raw.queue_limit)
 
     def start(self) -> ThreadPool:
@@ -130,14 +130,14 @@ class ThreadPool:
         - Iterator[ThreadPool] = context manager that yields this pool
 
         #### Example:
-        ``py
+        `py
         pool = ThreadPool(4).start()
         head = [0, 0, 0, 0]
         with pool.submit_queue():
             jobs = [pool.submit(bump_at, head, i) for i in range(4)]
         for j in jobs:
             j.join()
-        ``
+        `
 
         #### Technical terms:
         - SharedHost: cooperative native heap for `Shared[T]` values on this pool.

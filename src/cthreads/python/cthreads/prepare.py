@@ -52,7 +52,7 @@ def thread(fn, *args: Any, force: bool = False, **kwargs: Any) -> Job:
     - A `Job` object that can be awaited to get the result of the function.
 
     #### Example:
-    ```python
+    ``python
     import cthreads
     from cthreads import Thread
 
@@ -65,7 +65,7 @@ def thread(fn, *args: Any, force: bool = False, **kwargs: Any) -> Job:
     job.join()
     result = job.result()
     print(result)
-    ```
+    ``
     """
     from . import _ext_api
 

@@ -3,7 +3,7 @@
 Compile `@Thread` / `@Threadable` Python into native C++ kernels and run them **off the GIL**.
 
 ```text
-decorate → prepare/load → thread(...) → await job  (or join)
+decorate -> prepare/load -> thread(...) -> await job  (or join)
 ```
 
 ---
@@ -37,7 +37,7 @@ lock = sync.Lock()
 x = math.abs(-1.0)
 ```
 
-Do **not** add shadow `sync.py` / `math.py` modules or assign into `sys.modules["cthreads.sync"]` — that can double-init the extension.
+Do **not** add shadow `sync.py` / `math.py` modules or assign into `sys.modules["cthreads.sync"]` - that can double-init the extension.
 
 ---
 
@@ -62,7 +62,7 @@ Every parameter and return (except `-> None`) needs a resolvable type hint.
 
 ---
 
-## 3. `@Thread` — free functions
+## 3. `@Thread` - free functions
 
 Mark a function to compile into a native kernel.
 
@@ -91,12 +91,12 @@ result = await job          # preferred (async)
 
 ---
 
-## 4. `@Threadable` — data + methods
+## 4. `@Threadable` - data + methods
 
 A `@Threadable` class becomes a C++ `struct`. Fields are class annotations. Methods that run off the GIL are marked `@Thread`.
 
 ### Rules
-- **No user `__init__`** — the decorator supplies a dataclass-style constructor (`Cls(1.0, 2.0)` or `Cls(x=1.0)`; omitted fields zero / empty).
+- **No user `__init__`** - the decorator supplies a dataclass-style constructor (`Cls(1.0, 2.0)` or `Cls(x=1.0)`; omitted fields zero / empty).
 - Field types must be allowed (see §2).
 - `@Thread` methods: first parameter is `self`; other args/return follow `@Thread` rules.
 - Nested `@Threadable` types and `list[SomeThreadable]` are allowed (including self-refs via quotes / postponed evaluation where needed).
@@ -128,10 +128,10 @@ await job
 **Invalid**
 
 ```python
-# bound method with no explicit self arg — missing `self` in bind_args
+# bound method with no explicit self arg - missing `self` in bind_args
 thread(p.step)
 
-# __init__ on Threadable — not allowed by API rules
+# __init__ on Threadable - not allowed by API rules
 @Threadable
 class Bad:
     def __init__(self, x: float):
@@ -149,7 +149,7 @@ High-level entry:
 |-----------|----------|
 | Kernels already loaded, `force=False` | **Spawn only** (safe under concurrency) |
 | Nothing loaded | Cache-checked `prepare` + `load_kernels`, then spawn |
-| `force=True` while loaded | **Raises** — call `unload_kernels()` first |
+| `force=True` while loaded | **Raises** - call `unload_kernels()` first |
 
 ```python
 job = thread(add, 1, 2)
@@ -192,7 +192,7 @@ load_kernels(str(path))           # optional warm load at startup
 
 # ... many concurrent thread() calls ...
 
-unload_kernels()                  # manual — e.g. process shutdown or before force rebuild
+unload_kernels()                  # manual - e.g. process shutdown or before force rebuild
 ```
 
 **Force rebuild (Windows):** unload first, then rebuild, then load:
@@ -211,9 +211,9 @@ Also available: `compile()`, `build()` (lower-level pieces used by `prepare`).
 
 ### Statements
 - Annotated assign: `x: int = 1`
-- Assign to known **names** / **attributes** (after annotated declare) — not `xs[i] = …` / `d[k] = …` yet
+- Assign to known **names** / **attributes** (after annotated declare) - not `xs[i] = …` / `d[k] = …` yet
 - AugAssign: `+=`, `-=`, `*=`, … (target may be a name, attribute, or subscript expr)
-- Expression statements that are **calls** (e.g. `xs.append(v);`) — needed for mutating container methods
+- Expression statements that are **calls** (e.g. `xs.append(v);`) - needed for mutating container methods
 - `return`, `pass`, `if` / `else`, `while`, `break`, `continue`
 - `for x in xs:` when `xs` is a bare name typed as `list[...]`
 - `for i in range(n)` / `range(a, b)` / `range(a, b, s)` (positive step assumed)
@@ -221,24 +221,24 @@ Also available: `compile()`, `build()` (lower-level pieces used by `prepare`).
 
 ### Expressions
 - Literals, names, `obj.attr`, `xs[i]` / `d[k]` (no slices)
-- Arithmetic / bitwise ops in `pyOps.BINOPS` (including `%`, `**` → `std::pow`)
+- Arithmetic / bitwise ops in `pyOps.BINOPS` (including `%`, `**` -> `std::pow`)
 - Unary `+`, `-`, `not`, `~`
 - Comparisons `== != < <= > >=` (including chains)
 - Boolean `and` / `or`
 
-**Indexing notes:** reads via `xs[i]` / `d[k]` lower to C++ `operator[]`. For `unordered_map`, missing-key `d[k]` **inserts** a default-constructed value — prefer `d.get(k, default)` when you need a fallback without insert.
+**Indexing notes:** reads via `xs[i]` / `d[k]` lower to C++ `operator[]`. For `unordered_map`, missing-key `d[k]` **inserts** a default-constructed value - prefer `d.get(k, default)` when you need a fallback without insert.
 
 ### Calls (whitelist only)
 
 **Builtins** (bare name):
 
 ```python
-n = len(xs)           # → (xs).size()
-for i in range(n):    # → C++ index for-loop
+n = len(xs)           # -> (xs).size()
+for i in range(n):    # -> C++ index for-loop
     ...
 ```
 
-**List / dict methods** (receiver must be a bare **name** in scope typed as `list[...]` / `dict[...]` — not `self.items.append` yet):
+**List / dict methods** (receiver must be a bare **name** in scope typed as `list[...]` / `dict[...]` - not `self.items.append` yet):
 
 ```python
 @Thread
@@ -261,13 +261,13 @@ def lookup(d: dict[str, int], k: str) -> int:
 | `list` | `insert` | 2 | `insert(begin+i, v)` |
 | `list` | `pop` | 0 or 1 | copy + `pop_back` / erase at index |
 | `list` | `clear` | 0 | `clear` |
-| `dict` | `get` | **2** | `find` + default (no `get(k)` → `None`) |
+| `dict` | `get` | **2** | `find` + default (no `get(k)` -> `None`) |
 | `dict` | `pop` | **2** | find / erase + default (no KeyError path yet) |
 | `dict` | `clear` | 0 | `clear` |
 
 No keyword args on these methods. Unknown methods or bad arity raise at translate time.
 
-**Stdlib `math`** (resolved via globals — `import math` or `from math import sqrt`):
+**Stdlib `math`** (resolved via globals - `import math` or `from math import sqrt`):
 
 ```python
 import math
@@ -277,7 +277,7 @@ def f(x: float) -> float:
     return math.sqrt(x) + math.pi
 ```
 
-Mapped to `std::*` / `<cmath>` / `std::numbers` for supported names (`sqrt`, `sin`, `log`, `pi`, … — filtered by `hasattr(math, name)` on the running interpreter).
+Mapped to `std::*` / `<cmath>` / `std::numbers` for supported names (`sqrt`, `sin`, `log`, `pi`, … - filtered by `hasattr(math, name)` on the running interpreter).
 
 **`cthreads.math`** (module marked internal):
 
@@ -353,7 +353,7 @@ class SimState:
 def run(state: SimState, n: int) -> None:
     for i in range(n):
         state.step = i
-        __sync_state()          # writeback pack → Python Threadables
+        __sync_state()          # writeback pack -> Python Threadables
 
 state = SimState()
 state.step = 0
@@ -364,8 +364,8 @@ while not job.done():
 job.join()
 ```
 
-- `__sync_state()` — bare builtin inside `@Thread`; codegen → `cthreads::detail::__sync_state()` (TLS JobContext).
-- `sync_state(job)` / `job.sync_state()` — host API; same writeback path. Job must be started; no-op after finish.
+- `__sync_state()` - bare builtin inside `@Thread`; codegen -> `cthreads::detail::__sync_state()` (TLS JobContext).
+- `sync_state(job)` / `job.sync_state()` - host API; same writeback path. Job must be started; no-op after finish.
 
 ---
 
@@ -460,7 +460,7 @@ assert job.result() == 10
 
 ---
 
-## 10. Quick reference — do / don’t
+## 10. Quick reference - do / don’t
 
 | Do | Don’t |
 |----|--------|

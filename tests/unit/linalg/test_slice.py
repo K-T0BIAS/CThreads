@@ -1,4 +1,4 @@
-"""``linalg.Slice`` bindings."""
+"""`linalg.Slice` bindings."""
 
 from __future__ import annotations
 

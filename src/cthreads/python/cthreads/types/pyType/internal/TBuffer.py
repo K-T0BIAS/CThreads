@@ -8,8 +8,8 @@ class TBuffer:
     """
     Annotation helper for triple-buffer kernel params.
 
-    Use ``TBuffer[Particle]`` in @Thread signatures; codegen emits
-    ``cthreads::sync::tripple_buffer<Particle>``.
+    Use `TBuffer[Particle]` in @Thread signatures; codegen emits
+    `cthreads::sync::tripple_buffer<Particle>`.
     """
 
     __cthreads_tbuffer__ = True
@@ -23,7 +23,7 @@ class TBuffer:
 
 
 class PyTBuffer(PyType):
-    """Maps ``TBuffer[inner]`` to ``cthreads::sync::tripple_buffer<inner>``."""
+    """Maps `TBuffer[inner]` to `cthreads::sync::tripple_buffer<inner>`."""
 
     inner_type: PyType
 
@@ -56,7 +56,7 @@ TBUFFER_INTERNAL_NAMES: frozenset[str] = frozenset(
 
 
 def is_tbuffer_pytype(py_type: PyType) -> bool:
-    """True for ``TBuffer[...]`` and fixed ``cthreads.sync.TBuffer*`` types."""
+    """True for `TBuffer[...]` and fixed `cthreads.sync.TBuffer*` types."""
     return isinstance(py_type, PyTBuffer) or (
         isinstance(py_type, PyCThreadsInternalType)
         and py_type.name in TBUFFER_INTERNAL_NAMES
@@ -64,7 +64,7 @@ def is_tbuffer_pytype(py_type: PyType) -> bool:
 
 
 def is_sync_pytype(py_type: PyType) -> bool:
-    """True for ``Lock`` / ``Event`` / ``RWLock`` kernel params (non-copyable)."""
+    """True for `Lock` / `Event` / `RWLock` kernel params (non-copyable)."""
     return (
         isinstance(py_type, PyCThreadsInternalType)
         and py_type.name in SYNC_INTERNAL_NAMES

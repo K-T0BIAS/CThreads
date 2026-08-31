@@ -8,7 +8,7 @@
 
 namespace cthreads::math {
 
-// Per-Job / per-OS-thread engine — safe under parallel cthreads::spawn.
+// Per-Job / per-OS-thread engine - safe under parallel cthreads::spawn.
 inline std::mt19937& engine() {
     thread_local std::mt19937 gen{std::random_device{}()};
     return gen;

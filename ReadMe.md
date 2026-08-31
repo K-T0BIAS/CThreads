@@ -40,8 +40,8 @@ First `cthreads.thread(...)` auto-runs cache-checked `prepare` + `load_kernels`.
 
 Annotate what should become a native kernel:
 
-- **`@Thread`** — functions / methods compiled to C++
-- **`@Threadable`** — classes compiled to C++ structs (shared state across kernels)
+- **`@Thread`** - functions / methods compiled to C++
+- **`@Threadable`** - classes compiled to C++ structs (shared state across kernels)
 
 ## Supported types
 

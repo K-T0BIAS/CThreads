@@ -38,7 +38,7 @@ class MethodOp(NamedTuple):
 
 
 class CallPlugin(ABC):
-    """Handles `ast.Call` (free calls, ctors, or methods — subclass decides)."""
+    """Handles `ast.Call` (free calls, ctors, or methods - subclass decides)."""
 
     @abstractmethod
     def try_lower(
@@ -56,7 +56,7 @@ class CallPlugin(ABC):
 
 
 class AttrPlugin(ABC):
-    """Handles `ast.Attribute` (fields, props, module constants — not calls)."""
+    """Handles `ast.Attribute` (fields, props, module constants - not calls)."""
 
     @abstractmethod
     def try_lower(
@@ -143,7 +143,7 @@ def method_op(
     max_arity: int | None = None,
     includes: tuple[str, ...] = (),
 ) -> MethodOp:
-    """1:1 Python method → `(recv).name(args...)`."""
+    """1:1 Python method -> `(recv).name(args...)`."""
     if max_arity is None:
         max_arity = min_arity
 

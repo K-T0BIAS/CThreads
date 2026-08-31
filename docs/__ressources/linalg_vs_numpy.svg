@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="460" viewBox="0 0 720 460" role="img" aria-label="cthreads vs NumPy median speedup by op family">
   <rect width="720" height="460" fill="#ffffff"/>
-  <text x="118" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#111827">cthreads.linalg vs NumPy — median speedup by family</text>
+  <text x="118" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#111827">cthreads.linalg vs NumPy - median speedup by family</text>
   <text x="118" y="42" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#6b7280">Heavy suite · best-of · speedup = NumPy ms / cthreads ms (&gt;1 = cthreads faster) · axis capped at 8× · ‖ = matmul(parallel=True)</text>
   <rect x="510" y="14" width="12" height="12" rx="2" fill="#2563eb"/>
   <text x="526" y="24" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#111827">f32</text>

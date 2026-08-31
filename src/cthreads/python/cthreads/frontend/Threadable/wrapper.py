@@ -24,8 +24,8 @@ def Threadable(cls):
     - All methods must have type hints that are @Threadable
     - All methods must return a @Threadable or basic python type (int, float, str, bool)
     - All methods must accept @Threadable or basic python types as arguments
-    - Do not define ``__init__``; the decorator supplies a dataclass-style
-      constructor (positional/keyword fields; omitted fields match C++ ``T{}``)
+    - Do not define `__init__`; the decorator supplies a dataclass-style
+      constructor (positional/keyword fields; omitted fields match C++ `T{}`)
 
     #### Example:
 
@@ -84,7 +84,7 @@ def Threadable(cls):
                     f"Threadable method {name} has invalid type {hint}"
                 ) from e
 
-    # Host dataclass-style ctor. Omitted fields match C++ ``T{}`` / ``Name() = default``.
+    # Host dataclass-style ctor. Omitted fields match C++ `T{}` / `Name() = default`.
     hints = tuple(field_hints.items())
     field_names = tuple(name for name, _ in hints)
     field_set = frozenset(field_names)

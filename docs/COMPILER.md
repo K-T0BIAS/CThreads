@@ -104,7 +104,7 @@ def simulate_step(
         ax = ax + forces[i]
         i = i + 1
 
-    # stdlib math → std::…
+    # stdlib math -> std::…
     scale: float = math.sqrt(ax * ax + 1.0)
     p.velocity = p.velocity + scale * dt
     p.pos.x = p.pos.x + p.velocity * dt
@@ -119,7 +119,7 @@ def simulate_step(
     sh: Shape = Shape([n])
     view: ArrayF32 = vel_field.reshape(sh)
     if view.numel() > 0:
-        # property → C++ method
+        # property -> C++ method
         _ndim: int = view.ndim
 
     # triple-buffer: write this particle into a slot, publish
@@ -157,7 +157,7 @@ What this program *means* in plain language:
 3. `simulate_step` is a **free kernel** that mixes arithmetic, `math`, containers, linalg, `TBuffer`, and `__sync_state`.
 4. `thread(...)` does **not** run the Python body. It runs the compiled C++ copy on an OS thread, then copies structured mutations back into the Python objects.
 
-The rest of this document shows every intermediate step that makes that true. For trampoline / pack detail we zoom in on **`simulate_step`’s** simpler cousin from the classic docs where needed — the machinery is identical; only schemas grow with nested fields / lists / TBuffer.
+The rest of this document shows every intermediate step that makes that true. For trampoline / pack detail we zoom in on **`simulate_step`’s** simpler cousin from the classic docs where needed - the machinery is identical; only schemas grow with nested fields / lists / TBuffer.
 
 ---
 
@@ -224,11 +224,11 @@ Compile usually happens on the first `thread(...)` call if no kernel library is 
 
 ```text
 thread(simulate_step, ...)
-  → prepare()
-      → compile()   # CompileSession: units → emit .hpp/.cpp
-      → build()     # compile those into one shared library
-  → load_kernels(path_to_shared_library)
-  → spawn the job
+  -> prepare()
+      -> compile()   # CompileSession: units -> emit .hpp/.cpp
+      -> build()     # compile those into one shared library
+  -> load_kernels(path_to_shared_library)
+  -> spawn the job
 ```
 
 You can also call `cthreads.compile(force=...)` / `prepare(force=...)` explicitly.
@@ -250,11 +250,11 @@ You can also call `cthreads.compile(force=...)` / `prepare(force=...)` explicitl
 For our example that means (conceptually):
 
 ```text
-1. emit Vec2       →  my_project/__Threadable__/Vec2.{hpp,cpp}
-2. emit Particle   →  my_project/__Threadable__/Particle.{hpp,cpp}
+1. emit Vec2       ->  my_project/__Threadable__/Vec2.{hpp,cpp}
+2. emit Particle   ->  my_project/__Threadable__/Particle.{hpp,cpp}
                       (includes kick member + trampolines)
-3. emit simulate_step → my_project/__Thread__/simulate_step.{hpp,cpp}
-4. emit tbuffer runtime → my_project/__Thread__/cthreads_tbuffer.{hpp,cpp}
+3. emit simulate_step -> my_project/__Thread__/simulate_step.{hpp,cpp}
+4. emit tbuffer runtime -> my_project/__Thread__/cthreads_tbuffer.{hpp,cpp}
 ```
 
 Also:
@@ -374,7 +374,7 @@ CTHREADS_API void  Particle_kick__call(void* p);
 
 (Exact export names follow `kernel_meta` for symbol `"Particle_kick"`.)
 
-### 3.5 Method body: `self` → `this`
+### 3.5 Method body: `self` -> `this`
 
 `kick` translates with `owner=Particle` unit:
 
@@ -399,7 +399,7 @@ Entry point: `translate_function(fn, this_file=..., owner=None)` in `compiler/tr
 
 ### 4.1 Load source and get the function AST
 
-`Source.parse_function(fn)` → `inspect.getsource` → dedent → `ast.parse` → `FunctionDef`.
+`Source.parse_function(fn)` -> `inspect.getsource` -> dedent -> `ast.parse` -> `FunctionDef`.
 
 After that, **nobody looks at the original source text again**. Later decisions are “what kind of node is this?”
 
@@ -443,12 +443,12 @@ Dispatch lives under `compiler/translation/syntax/`:
 | Concern | Module |
 |---------|--------|
 | Constants / list displays | `Literal` |
-| Names (`self` → `(*this)`) | `Name` |
+| Names (`self` -> `(*this)`) | `Name` |
 | `+` `**` `and` compare | `Op` |
 | Assign / AnnAssign / AugAssign | `Assign` |
 | if / for / while / return | `Flow` |
 | subscript | `Index` |
-| Call / Attribute | `Syntax` → **plugins** |
+| Call / Attribute | `Syntax` -> **plugins** |
 
 #### Annotated locals
 
@@ -456,18 +456,18 @@ Dispatch lives under `compiler/translation/syntax/`:
 i: int = 0
 ```
 
-→ name table `symbols["i"] = PyInt()`, emit `int i = 0;`
+-> name table `symbols["i"] = PyInt()`, emit `int i = 0;`
 
 Plain `i = 0` for a **new** name is rejected. That is deliberate: the name table has no other way to learn the type.
 
 #### `len(forces)`
 
-`LenPlugin`: `(forces).size()` (TBuffer → `.capacity()`).
+`LenPlugin`: `(forces).size()` (TBuffer -> `.capacity()`).
 
 #### `p.lock.acquire()`
 
-1. `Typeof.of(p.lock)` → Threadable field `lock` → `PyCThreadsInternalType("Lock")`.
-2. `SyncMethodPlugin` → `(p.lock).acquire()`.
+1. `Typeof.of(p.lock)` -> Threadable field `lock` -> `PyCThreadsInternalType("Lock")`.
+2. `SyncMethodPlugin` -> `(p.lock).acquire()`.
 
 #### `math.sqrt(...)`
 
@@ -479,20 +479,20 @@ Plain `i = 0` for a **new** name is rejected. That is deliberate: the name table
 
 #### `Shape([n])` / `vel_field.reshape(sh)` / `view.ndim`
 
-- List display `[n]` → `std::vector<int>{n}` (element type from name table / literals).
-- `LinalgCtorPlugin` / `LinalgMethodPlugin` / `LinalgPropPlugin` (`ndim` property → `(view).ndim()`).
+- List display `[n]` -> `std::vector<int>{n}` (element type from name table / literals).
+- `LinalgCtorPlugin` / `LinalgMethodPlugin` / `LinalgPropPlugin` (`ndim` property -> `(view).ndim()`).
 
 #### `buf.publish()`
 
-`TBufferMethodPlugin` → `(buf).publish()`.
+`TBufferMethodPlugin` -> `(buf).publish()`.
 
 #### `__sync_state()`
 
-`SyncStatePlugin` → `cthreads::detail::__sync_state()` + include `syncState.hpp`. At runtime this is the mid-run writeback barrier into the host Python objects (TLS in `_ext`).
+`SyncStatePlugin` -> `cthreads::detail::__sync_state()` + include `syncState.hpp`. At runtime this is the mid-run writeback barrier into the host Python objects (TLS in `_ext`).
 
 #### `return fast`
 
-→ `return fast;` with `fast` already in the name table as `bool`.
+-> `return fast;` with `fast` already in the name table as `bool`.
 
 ### 4.4 The real C++ kernel (abbreviated)
 
@@ -605,7 +605,7 @@ Also stored in process-global `KERNELS["simulate_step"]` as a `KernelMeta` datac
 | **Declaration** | `simulate_step.hpp` | Lifecycle trio (+ real kernel decl) |
 | **Definition** | `simulate_step.cpp` | Kernel body, pack struct, lifecycle + **all accessors** |
 
-Marshal finds accessors **by symbol name** via ctypes after `load_kernels` — they need not be listed in the header.
+Marshal finds accessors **by symbol name** via ctypes after `load_kernels` - they need not be listed in the header.
 
 ### 5.4 Pack layout (conceptual)
 
@@ -623,8 +623,8 @@ struct simulate_step__args {
 
 Exact member types follow `emit_trampoline_cpp`. Important ideas:
 
-- `pass_as: "ref"` Threadable → pack **owns** a value `Particle a0`; `__call` passes `a->a0` as `Particle&`.
-- `pass_as: "tbuffer"` → pack holds a **pointer**; marshal sets it with `…__set_aN_ptr` from `TBufferHandle` / native ptr.
+- `pass_as: "ref"` Threadable -> pack **owns** a value `Particle a0`; `__call` passes `a->a0` as `Particle&`.
+- `pass_as: "tbuffer"` -> pack holds a **pointer**; marshal sets it with `…__set_aN_ptr` from `TBufferHandle` / native ptr.
 - Nested fields get accessors like `simulate_step__set_a0_pos_x`.
 - Lists/dicts get resize / set_elem / insert helpers (see trampoline emission in `kernel_meta.py`).
 
@@ -698,18 +698,18 @@ First call: prepare + load + spawn. Later calls: spawn only.
 
 1. `fn.__threaded` must be true.
 2. `fn.__kernel_meta__` must exist.
-3. Args bound against meta param names → ordered values.
+3. Args bound against meta param names -> ordered values.
 
 ### 7.3 `spawn_from_meta`
 
 1. `pack = simulate_step__args_new()`
 2. `marshal.pack_params(...)` fills the pack
-3. Worker lambda: `__call` → `writeback_params` → `unpack_return` → `__args_free`
+3. Worker lambda: `__call` -> `writeback_params` -> `unpack_return` -> `__args_free`
 4. Return `Job` (not started until `start()` / `await`)
 
 ---
 
-## 8. Packing: Python values → C++ pack
+## 8. Packing: Python values -> C++ pack
 
 `cthreads.marshal.pack_params` walks each parameter schema and calls `…__set_…` trampolines.
 
@@ -718,7 +718,7 @@ First call: prepare + load + spawn. Later calls: spawn only.
 | 0 | `a0` | `Particle` instance | threadable (nested pos, list, dict, lock, …) |
 | 1 | `a1` | `forces` list | list[float] |
 | 2 | `a2` | `0.1` | float |
-| 3 | `a3` | `TBufferHandle` / buffer | tbuffer → set ptr |
+| 3 | `a3` | `TBufferHandle` / buffer | tbuffer -> set ptr |
 | 4 | `a4` | `0` | int |
 | 5 | `a5` | `ArrayF32` | internal array |
 
@@ -739,7 +739,7 @@ After packing, the pack holds **copies** (or pointers into kernel-owned buffers)
 
 ### 9.1 Call
 
-`job.start()` → OS thread → `simulate_step__call(pack)` → real `simulate_step(...)`.
+`job.start()` -> OS thread -> `simulate_step__call(pack)` -> real `simulate_step(...)`.
 
 Mutations hit the pack’s `Particle a0`, vector `a1`, etc.
 
@@ -754,7 +754,7 @@ After `__call` returns, worker (with GIL) runs `writeback_params` again for stru
 ### 9.4 Unpack return / free
 
 ```text
-unpack_return → bool into Job result box
+unpack_return -> bool into Job result box
 simulate_step__args_free(pack)
 ```
 
@@ -771,8 +771,8 @@ print(job.result())  # True/False
 
 ```text
 demo.py import
-  @Threadable Vec2, Particle  →  REGISTRY.threadables
-  @Thread kick, simulate_step →  REGISTRY.threads
+  @Threadable Vec2, Particle  ->  REGISTRY.threadables
+  @Thread kick, simulate_step ->  REGISTRY.threads
 
 first thread(simulate_step, …)
   CompileSession.compile
@@ -780,7 +780,7 @@ first thread(simulate_step, …)
     emit Vec2, Particle(+kick), simulate_step
     write_tbuffer_runtime (Particle)
     attach __kernel_meta__ / KERNELS
-  build → cthreads_kernels shared library
+  build -> cthreads_kernels shared library
   load_kernels
 
   spawn
@@ -806,12 +806,12 @@ Python Particle / lists updated in place
 
 | Layer | What it is |
 |-------|------------|
-| Python `@Threadable` | Normal class; compile → C++ `struct` |
-| Python `@Thread` | Normal function; compile → C++ kernel + pack API |
+| Python `@Threadable` | Normal class; compile -> C++ `struct` |
+| Python `@Thread` | Normal function; compile -> C++ kernel + pack API |
 | `REGISTRY.threadables` / `threads` | Import-time registration |
 | `REGISTRY.*_units` | Compile-time paths + field types + emit handles |
 | `TranslationContext` | Scratch pad: symbols, includes, owner, `this_file` |
-| `Syntax` + plugins | AST → C++ strings |
+| `Syntax` + plugins | AST -> C++ strings |
 | `KernelMeta` / trampolines | Stable C ABI for marshal / `_ext` |
 | `marshal` | Schema-driven ctypes calls to set/get symbols |
 | `Job` | Native thread handle + result box |
@@ -822,7 +822,7 @@ One sentence:
 
 ---
 
-## 12. Compile in depth (registry → units → files)
+## 12. Compile in depth (registry -> units -> files)
 
 Code:
 
@@ -840,7 +840,7 @@ prepare.py / build.py
 | Phrase | Meaning |
 |--------|---------|
 | **Registry** | Process-wide maps filled by decorators; units filled by `CompileSession` |
-| **Unit** | `ThreadableUnit` or `ThreadUnit` — one emitable artifact |
+| **Unit** | `ThreadableUnit` or `ThreadUnit` - one emitable artifact |
 | **Fingerprint / src_hash** | Hash of Python source; skip rewrite when unchanged |
 | **Syntax tree** | Python `ast` nodes |
 
@@ -848,7 +848,7 @@ prepare.py / build.py
 
 `thread(simulate_step, …)` may *trigger* compile, but `compile()` emits **every** registered Threadable and Thread (methods claimed under their owner). One shared library contains every kernel.
 
-Empty registry → `RuntimeError: Nothing registered to compile`.
+Empty registry -> `RuntimeError: Nothing registered to compile`.
 
 ### 12.3 Project root and folders
 
@@ -876,7 +876,7 @@ Threadables first so `include_for(PyThreadable("Particle"), …)` can resolve `h
 High level (`threadableUnit.py`):
 
 1. Validate `@Threadable`.
-2. Fingerprint class (+ methods). If unchanged and files exist and not `force` → skip rewrite; still refresh method kernel meta as needed.
+2. Fingerprint class (+ methods). If unchanged and files exist and not `force` -> skip rewrite; still refresh method kernel meta as needed.
 3. Else: for each method, `translate_function(..., owner=self, this_file=hpp_path)`; build struct fields via `include_for`; `build_kernel_meta` + trampolines for methods; `write_if_changed` hpp/cpp.
 
 ### 12.6 One free ThreadUnit.emit
@@ -906,11 +906,11 @@ High level (`threadableUnit.py`):
 - Pack Python values
 - Load the DLL (`build` + `load_kernels`)
 
-Contract: **registry → units + C++ text + metadata.**
+Contract: **registry -> units + C++ text + metadata.**
 
 ---
 
-## 13. Translation in depth (AST → C++ strings)
+## 13. Translation in depth (AST -> C++ strings)
 
 Translation does not know about DLLs or Jobs. Compile *calls* it; emit writes disks.
 
@@ -930,14 +930,14 @@ compiler/translation/
     cthreads_math/
     sync/               Lock/Event/RWLock, TBuffer, __sync_state
     linalg/             methods, ctors, props
-    fields/             FieldAttrPlugin (self.x → this->x)  # register last
+    fields/             FieldAttrPlugin (self.x -> this->x)  # register last
 ```
 
 ### 13.1 `translate_function` pipeline
 
-1. `Source.parse_function(fn)` → `FunctionDef`
+1. `Source.parse_function(fn)` -> `FunctionDef`
 2. `TranslationContext(fn, this_file, owner)`
-3. `Signature.translate(func_def, ctx)` → fills `symbols`, `sig_includes`, `params_csv`, return type
+3. `Signature.translate(func_def, ctx)` -> fills `symbols`, `sig_includes`, `params_csv`, return type
 4. For each stmt in body: `Syntax.stmt(stmt, ctx)`
 5. Return `TranslationResult`
 
@@ -948,7 +948,7 @@ compiler/translation/
 | `fn` | Live function (`__globals__` for math/linalg lookups) |
 | `this_file` | Generated `.hpp` path (relative includes) |
 | `owner` | `ThreadableUnit` for methods; else `None` |
-| `symbols` | Name → `PyType` |
+| `symbols` | Name -> `PyType` |
 | `sig_includes` / `body_includes` | `#include` lines |
 | `seen_*` | Dedup includes |
 | `func_name` | Property from `fn.__name__` |
@@ -960,9 +960,9 @@ Name table introductions:
 | Signature params | Always |
 | `x: int = …` | AnnAssign |
 | `for i in range` / `for x in xs` | Loop var, removed after loop |
-| Method | `self` → `PyThreadable(owner.name)` |
+| Method | `self` -> `PyThreadable(owner.name)` |
 
-### 13.3 Python types → `PyType` → C++ (`types/`)
+### 13.3 Python types -> `PyType` -> C++ (`types/`)
 
 | You write | Internal | C++ |
 |-----------|----------|-----|
@@ -975,14 +975,14 @@ Name table introductions:
 ### 13.4 `Typeof.of` (receiver typing for methods)
 
 ```text
-Name        → symbols[name]
-Attribute   → if base is PyThreadable: unit.fields[attr]
-Subscript   → if base is PyList: inner type
+Name        -> symbols[name]
+Attribute   -> if base is PyThreadable: unit.fields[attr]
+Subscript   -> if base is PyList: inner type
 ```
 
 Field types come from **`REGISTRY.threadable_units[name].fields`** (filled at compile), not a second handwritten map.
 
-Printing `this->a` is separate (`FieldAttrPlugin`). Common bug: path prints but type is unknown → call plugins miss → `unsupported call`.
+Printing `this->a` is separate (`FieldAttrPlugin`). Common bug: path prints but type is unknown -> call plugins miss -> `unsupported call`.
 
 ### 13.5 Statement / expression catalog (supported)
 
@@ -1025,11 +1025,11 @@ Examples:
 
 `include_for(py_type, this_file)`:
 
-- primitives → often empty / STL
-- Threadable → `os.path.relpath(unit.hpp_path, this_file.parent)`
-- internal → quoted `"linalg/array.hpp"` etc. + extra STL
+- primitives -> often empty / STL
+- Threadable -> `os.path.relpath(unit.hpp_path, this_file.parent)`
+- internal -> quoted `"linalg/array.hpp"` etc. + extra STL
 
-Signature includes → `.hpp`; body-only → `.cpp` after `#include "simulate_step.hpp"`.
+Signature includes -> `.hpp`; body-only -> `.cpp` after `#include "simulate_step.hpp"`.
 
 ### 13.8 What translation returns
 
@@ -1040,7 +1040,7 @@ Translation never writes to disk.
 ### 13.9 Intentional limits
 
 - Only dispatched AST kinds + plugins
-- Host-only Array helpers (`from_list`, …) are not kernel ops — build on host, pass in
+- Host-only Array helpers (`from_list`, …) are not kernel ops - build on host, pass in
 - Method tables are the **kernel** API; do not mirror every Python host method blindly
 - `Shape` C++ ctor takes `vector<size_t>` (and `vector<int>` for codegen); keep that in mind if you change list-literal lowering
 
@@ -1096,8 +1096,8 @@ If `is_threadable` + `hint_to_pytype` accept it, units’ `fields` and `Typeof` 
         ├── ThreadableUnit / ThreadUnit     (paths, fields, params)
         ├── unit.emit()
         │     ├── translate_function
-        │     │     ├── Signature → symbols
-        │     │     └── Syntax + plugins → body
+        │     │     ├── Signature -> symbols
+        │     │     └── Syntax + plugins -> body
         │     ├── kernel_meta trampolines
         │     └── write .hpp/.cpp
         └── write_tbuffer_runtime
@@ -1108,11 +1108,11 @@ If `is_threadable` + `hint_to_pytype` accept it, units’ `fields` and `Typeof` 
 
 One sentence for this half:
 
-**Compile fills units on the registry and emits files; translation walks the AST with a name table and ordered plugins; `Typeof` types dotted receivers from unit fields; trampolines and `thread()` are a later layer — do not put packing logic inside a new expression plugin.**
+**Compile fills units on the registry and emits files; translation walks the AST with a name table and ordered plugins; `Typeof` types dotted receivers from unit fields; trampolines and `thread()` are a later layer - do not put packing logic inside a new expression plugin.**
 
 ---
 
-## 15. Quick reference — public API
+## 15. Quick reference - public API
 
 ```python
 from cthreads import (

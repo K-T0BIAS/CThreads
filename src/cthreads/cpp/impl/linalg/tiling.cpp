@@ -74,7 +74,7 @@ std::vector<Tile<T>> Tile<T>::tiles(T* data, const Shape& shape) {
     return tiles_vectors(data, shape.numel(), shape);
 }
 
-// Explicit instantiations — keep Tile<> usable from other TUs without the impl.
+// Explicit instantiations - keep Tile<> usable from other TUs without the impl.
 template struct Tile<float>;
 template struct Tile<double>;
 template struct Tile<int>;

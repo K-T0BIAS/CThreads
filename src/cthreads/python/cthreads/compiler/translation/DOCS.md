@@ -1,6 +1,6 @@
 # V2 Translation
 
-Turns one `@Thread` function into C++ **strings**. It does **not** write `.hpp` / `.cpp` files — that is emit’s job later.
+Turns one `@Thread` function into C++ **strings**. It does **not** write `.hpp` / `.cpp` files - that is emit’s job later.
 
 **Prerequisite:** `CompileSession.compile()` has already filled `REGISTRY.threadable_units` / `thread_units` (paths + field types). Translation uses those for includes and for [`Typeof`](#typeofpy).
 
@@ -54,7 +54,7 @@ After `CompileSession.compile()`:
 - `REGISTRY.threadable_units["Particle"]` has `hpp_path`, `fields`, `methods`
 - Method unit has `params`, `return_type`, `owner`
 
-### 1. Parse source — [`Source.parse_function`](#sourcepy)
+### 1. Parse source - [`Source.parse_function`](#sourcepy)
 
 ```python
 from cthreads.V2.compile.translation import (
@@ -66,7 +66,7 @@ unit = REGISTRY.threadable_units["Particle"]
 func_def = Source.parse_function(fn)   # ast.FunctionDef
 ```
 
-### 2. Create context — [`TranslationContext`](#contextpy)
+### 2. Create context - [`TranslationContext`](#contextpy)
 
 ```python
 ctx = TranslationContext(
@@ -76,7 +76,7 @@ ctx = TranslationContext(
 )
 ```
 
-### 3. Signature — [`Signature.translate`](#signaturepy)
+### 3. Signature - [`Signature.translate`](#signaturepy)
 
 ```python
 sig = Signature.translate(func_def, ctx)
@@ -88,14 +88,14 @@ Effects:
 |--------|--------|
 | `sig.func_name` | `"move"` |
 | `sig.params_csv` | `"double dt"` (`self` dropped from C++) |
-| `sig.return_type` | `None` → void |
+| `sig.return_type` | `None` -> void |
 | `ctx.symbols["self"]` | `PyThreadable("Particle")` |
 | `ctx.symbols["dt"]` | `PyFloat()` |
 | `ctx.sig_includes` | any `#include` needed by params / return |
 
 Uses [`include_for`](#includepy) / [`add_include`](#includepy) and `hint_to_pytype`.
 
-### 4. Body — [`Syntax.stmt`](./syntax/DOCS.md#syntaxexpr--syntaxstmt) / [`Syntax.expr`](./syntax/DOCS.md#syntaxexpr--syntaxstmt)
+### 4. Body - [`Syntax.stmt`](./syntax/DOCS.md#syntaxexpr--syntaxstmt) / [`Syntax.expr`](./syntax/DOCS.md#syntaxexpr--syntaxstmt)
 
 ```python
 body_lines: list[str] = []
@@ -108,7 +108,7 @@ What each statement hits in this example:
 
 | Python | Syntax entry | Detail |
 |--------|--------------|--------|
-| `scale: float = 1.0` | [`Assign.ann_assign`](./syntax/DOCS.md#assignann_assign) | annotation via [`Source.resolve_annotation`](#sourcepy); RHS via [`Literal.constant`](./syntax/DOCS.md#literalconstant) → [`Cpp.literal`](#cpppy) |
+| `scale: float = 1.0` | [`Assign.ann_assign`](./syntax/DOCS.md#assignann_assign) | annotation via [`Source.resolve_annotation`](#sourcepy); RHS via [`Literal.constant`](./syntax/DOCS.md#literalconstant) -> [`Cpp.literal`](#cpppy) |
 | `n: int = 2 + 3` | [`Assign.ann_assign`](./syntax/DOCS.md#assignann_assign) | RHS [`Op.bin_op`](./syntax/DOCS.md#opbin_op) |
 | `if n > 0:` … | [`Flow.if_stmt`](./syntax/DOCS.md#flowif_stmt) | test [`Op.compare`](./syntax/DOCS.md#opcompare); body nested with [`Flow.nest`](./syntax/DOCS.md#flownest) |
 | `for i in range(3):` | [`Flow.for_stmt`](./syntax/DOCS.md#flowfor_stmt) | `range` via [`Op.is_builtin_call`](./syntax/DOCS.md#opis_builtin_call); loop var in `ctx.symbols` then removed |
@@ -130,7 +130,7 @@ Emitted body (approx.):
 
 **Not supported yet in this example’s “real” physics body:** `self.x = …` needs [`ast.Attribute`](./syntax/DOCS.md#not-wired-call--attribute) (plugins).
 
-### 5. Pack result — [`TranslationResult`](#resultpy)
+### 5. Pack result - [`TranslationResult`](#resultpy)
 
 ```python
 result = TranslationResult(
@@ -166,7 +166,7 @@ Mutable state for **one** function walk.
 | `fn` | `Callable` | Live `@Thread` function |
 | `this_file` | `Path` | Generated `.hpp`/`.cpp` path; base for relative includes |
 | `owner` | `ThreadableUnit \| None` | Method owner, or `None` if free function |
-| `symbols` | `dict[str, PyType]` | Local / param name → type (`typeof` / name checks) |
+| `symbols` | `dict[str, PyType]` | Local / param name -> type (`typeof` / name checks) |
 | `sig_includes` | `list[str]` | `#include` lines from the signature |
 | `body_includes` | `list[str]` | `#include` lines from the body |
 | `seen_sig` / `seen_body` | `set[str]` | Dedup for [`add_include`](#includepy) |
@@ -224,7 +224,7 @@ Builds `#include …` text needed to use `py_type` in the file at `this_file` (t
 
 | `py_type` | Behavior |
 |-----------|----------|
-| `PyThreadable` | `REGISTRY.threadable_units[name].hpp_path` → `os.path.relpath` from `this_file`’s directory; skip if same file (no self-include); requires units filled |
+| `PyThreadable` | `REGISTRY.threadable_units[name].hpp_path` -> `os.path.relpath` from `this_file`’s directory; skip if same file (no self-include); requires units filled |
 | `PyList` / `PyDict` / `PyTBuffer` | Own header via `PyType.build_include` **plus** recursive `include_for` on inners (so `list[Particle]` still gets `Particle.hpp`) |
 | Other | `py_type.build_include()` |
 
@@ -234,7 +234,7 @@ Builds `#include …` text needed to use `py_type` in the file at `this_file` (t
 
 #### `Cpp.CMATH`
 
-`"#include <cmath>\n"` — used when lowering `**` ([`Op.bin_op`](./syntax/DOCS.md#opbin_op), [`Assign.aug_assign`](./syntax/DOCS.md#assignaug_assign)).
+`"#include <cmath>\n"` - used when lowering `**` ([`Op.bin_op`](./syntax/DOCS.md#opbin_op), [`Assign.aug_assign`](./syntax/DOCS.md#assignaug_assign)).
 
 #### `Cpp.literal(value) -> str`
 
@@ -253,7 +253,7 @@ Used by [`Literal.constant`](./syntax/DOCS.md#literalconstant).
 
 #### `Source.parse_function(fn) -> ast.FunctionDef`
 
-`inspect.getsource` → dedent → `ast.parse` → first `FunctionDef` in the module body.
+`inspect.getsource` -> dedent -> `ast.parse` -> first `FunctionDef` in the module body.
 
 #### `Source.resolve_annotation(node, globals_ns) -> Any`
 
@@ -274,8 +274,8 @@ Best-effort source for errors (`ast.unparse`, else type name).
 | Node | Rule |
 |------|------|
 | `Name` | `ctx.symbols.get(id)` |
-| `Attribute` | `Typeof.of(value)` must be `PyThreadable` → `REGISTRY.threadable_units[name].fields[attr]` |
-| `Subscript` (not slice) | base `PyList` → `inner_type` |
+| `Attribute` | `Typeof.of(value)` must be `PyThreadable` -> `REGISTRY.threadable_units[name].fields[attr]` |
+| `Subscript` (not slice) | base `PyList` -> `inner_type` |
 | else | `None` |
 
 ---
@@ -286,10 +286,10 @@ Best-effort source for errors (`ast.unparse`, else type name).
 
 1. `get_type_hints(ctx.fn)` (with owner class in `localns` if method).
 2. If method and first arg is `self`: register `symbols["self"] = PyThreadable(owner.name)`, drop from C++ params.
-3. For each remaining arg: require annotation → `hint_to_pytype` → `symbols` + [`include_for`](#includepy) into `sig_includes`.
+3. For each remaining arg: require annotation -> `hint_to_pytype` -> `symbols` + [`include_for`](#includepy) into `sig_includes`.
 4. Pass-by-ref (`Type& name`) for TBuffer / `PyThreadable` / `PyList` / `PyDict`; scalars by value.
 5. Reject `*args` / `**kwargs` / kw-only.
-6. Return annotation → `PyType` or `None` (void); include return type headers if needed.
+6. Return annotation -> `PyType` or `None` (void); include return type headers if needed.
 
 ---
 
@@ -316,7 +316,7 @@ Quick map of what the top-level flow calls:
 
 | Missing | Notes |
 |---------|--------|
-| `translate_function()` one-shot | Glue Signature + Syntax → `TranslationResult` |
+| `translate_function()` one-shot | Glue Signature + Syntax -> `TranslationResult` |
 | Call / Attribute plugins | [`Syntax.expr`](./syntax/DOCS.md#not-wired-call--attribute) raises today |
 | Emit | Write files from `TranslationResult` + unit paths |
 | Kernel meta / trampolines | Still v1 |

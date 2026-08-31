@@ -1,4 +1,4 @@
-"""One-shot: parse → Signature → Syntax.stmt → TranslationResult."""
+"""One-shot: parse -> Signature -> Syntax.stmt -> TranslationResult."""
 
 from __future__ import annotations
 

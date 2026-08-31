@@ -114,7 +114,7 @@ public:
         _path.clear();
     }
 
-    // Raw symbol lookup (nullptr if missing — check before cast).
+    // Raw symbol lookup (nullptr if missing - check before cast).
     void* sym(const char* name) const {
         if (!_handle) {
             throw std::runtime_error("KernelLib: no library loaded");
@@ -130,7 +130,7 @@ public:
 #endif
     }
 
-    // Typed lookup — throws if the export is missing.
+    // Typed lookup - throws if the export is missing.
     template <class Fn>
     Fn get(const char* name) const {
         void* p = sym(name);
@@ -161,7 +161,7 @@ std::unique_ptr<CThread> dispatch(KernelLib& lib, const char* name, Args... args
     if (!lib.loaded()) {
         throw std::runtime_error(
             std::string("dispatch: kernel library not loaded (os=") + kHostOS +
-            ") — call load_kernels(BINARY_PATH) after build()"
+            ") - call load_kernels(BINARY_PATH) after build()"
         );
     }
     if (lib.sym(name) == nullptr) {

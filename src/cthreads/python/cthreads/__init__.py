@@ -1,5 +1,5 @@
 """
-cthreads — Python frontend + native runtime (V2 promoted to package root).
+cthreads - Python frontend + native runtime (V2 promoted to package root).
 
 Public surface:
   @cthreads.Threadable / @cthreads.Thread
@@ -7,18 +7,18 @@ Public surface:
   cthreads.Job (awaitable native thread handle)
   cthreads.sync / cthreads.math / …  (pybind submodules on _ext)
 
-Legacy v1 tree lives under ``cthreads.V1``.
-A thin ``cthreads.V2`` shim re-exports this package for old imports.
+Legacy v1 tree lives under `cthreads.V1`.
+A thin `cthreads.V2` shim re-exports this package for old imports.
 
 Jobs::
 
     job = cthreads.thread(fn, ...)
     result = await job
 
-``thread()`` spawns on already-loaded kernels. First use runs cache-checked
-``prepare`` + ``load_kernels``. Call ``unload_kernels()`` before a force-rebuild.
+`thread()` spawns on already-loaded kernels. First use runs cache-checked
+`prepare` + `load_kernels`. Call `unload_kernels()` before a force-rebuild.
 
-Native ``_ext`` packs args via ``cthreads.marshal`` (this package).
+Native `_ext` packs args via `cthreads.marshal` (this package).
 """
 
 from typing import Any

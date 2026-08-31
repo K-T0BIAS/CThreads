@@ -90,7 +90,7 @@ def _project_root_from_units() -> Path:
 
     if not roots:
         raise RuntimeError(
-            "No compiled units — call CompileSession.compile() before build()"
+            "No compiled units - call CompileSession.compile() before build()"
         )
     if len(roots) == 1:
         return next(iter(roots))

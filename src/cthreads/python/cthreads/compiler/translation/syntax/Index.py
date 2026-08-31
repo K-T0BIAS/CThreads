@@ -4,7 +4,7 @@ from ..context import TranslationContext
 
 
 class Index:
-    """ast.Subscript — list/dict indexing (not slices)."""
+    """ast.Subscript - list/dict indexing (not slices)."""
 
     @staticmethod
     def subscript(node: ast.Subscript, ctx: TranslationContext) -> str:

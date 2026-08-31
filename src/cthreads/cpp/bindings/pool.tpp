@@ -10,11 +10,11 @@
 #include <vector>
 
 /**
-Bind ``cthreads._ext.pool`` (FixedPool / ThreadPool).
+Bind `cthreads._ext.pool` (FixedPool / ThreadPool).
 
 Included from module.cpp inside the anonymous namespace so submit can call
-``spawn_from_meta`` / ``bind_args`` with the same Job type as ``thread()``.
-Called via the global ``bind_pool`` wrapper in module.cpp.
+`spawn_from_meta` / `bind_args` with the same Job type as `thread()`.
+Called via the global `bind_pool` wrapper in module.cpp.
 */
 inline void bind_pool_impl(py::module_& parent) {
     py::module_ pool = parent.def_submodule("pool", "thread pools");
@@ -68,7 +68,7 @@ inline void bind_pool_impl(py::module_& parent) {
                 return self.is_running(thread_id);
             },
             py::arg("thread_id"),
-            "True if worker ``thread_id`` is currently executing a task."
+            "True if worker `thread_id` is currently executing a task."
         )
         .def(
             "is_running",
@@ -91,7 +91,7 @@ inline void bind_pool_impl(py::module_& parent) {
                 }
                 if (!py::hasattr(fn, "__kernel_meta__")) {
                     throw std::runtime_error(
-                        "cthreads.pool.ThreadPool.submit: missing __kernel_meta__ — "
+                        "cthreads.pool.ThreadPool.submit: missing __kernel_meta__ - "
                         "call cthreads.compile() first"
                     );
                 }
@@ -130,7 +130,7 @@ inline void bind_pool_impl(py::module_& parent) {
                         }
                         if (!py::hasattr(fn, "__kernel_meta__")) {
                             throw std::runtime_error(
-                                "cthreads.pool.ThreadPool.submit: missing __kernel_meta__ — "
+                                "cthreads.pool.ThreadPool.submit: missing __kernel_meta__ - "
                                 "call cthreads.compile() first"
                             );
                         }
