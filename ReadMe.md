@@ -3,7 +3,7 @@
 
 ----
 
-**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL** allowing true concurrency without `multiprocessing`’s process boundaries and pickling tax.
+**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL** allowing true concurrency without `multiprocessing`'s process boundaries and pickling tax.
 
 Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist covers the usual scalars and containers, plus your own Threadable types. Code runs at native speed while you keep a Python-shaped control flow (jobs, pools, sync).
 
@@ -23,7 +23,19 @@ Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist c
 
 # Install
 
-**Python ≥ 3.10**, a **C++17** compiler, and **CMake ≥ 3.18**. Full toolchain notes (MSVC / gcc / clang, venv CMake): [docs/install.md](./docs/install.md).
+**Python >= 3.10**, a **C++17** compiler, and **CMake >= 3.18** (CMake is only needed to build the native `_ext` module). Full toolchain notes: [docs/install.md](./docs/install.md).
+
+### From PyPI
+
+Published wheels (Linux / Windows x86_64) and the sdist are on [PyPI](https://pypi.org/project/cthreads/):
+
+```bash
+pip install cthreads
+```
+
+You still need a C++ compiler for the first `thread(...)` (user kernels). On Linux, wheels include a prebuilt `_ext`; CMake is only required if you install from the sdist or develop from source.
+
+### From this repo (editable)
 
 ```bash
 python -m venv .venv
@@ -33,6 +45,8 @@ pip install -e ".[test]"   # or: pip install -e .
 ```
 
 First `cthreads.thread(...)` auto-runs cache-checked `prepare` + `load_kernels`. Call `unload_kernels()` before a force rebuild (`thread(..., force=True)` or `prepare(force=True)`).
+
+How we publish: [docs/release.md](./docs/release.md).
 
 ----
 
@@ -91,7 +105,7 @@ def example_function(val1: int, val2: list[float], val3: ExampleClass) -> Exampl
 
 ## `@Threadable`
 
-Python’s open object model does not map cleanly to C++. `@Threadable` marks a class so the compiler can emit a fixed C++ struct and marshal it safely.
+Python's open object model does not map cleanly to C++. `@Threadable` marks a class so the compiler can emit a fixed C++ struct and marshal it safely.
 
 ```python
 from cthreads import Threadable
@@ -166,7 +180,3 @@ result = await job
 Signature: `cthreads.thread(fn, *args, force: bool = False, **kwargs) -> Job`.
 
 ----
-
-# What’s next
-
-**TODO LINK DOCS WHEN COMPLETE**

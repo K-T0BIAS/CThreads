@@ -11,4 +11,4 @@
 | How to use `cthreads.Job` for custom thread handling and `async` applications | [link](./guide/jobs.md) |
 | `cthreads documentation` | [link](./COMPILER.md) |
 | **Release**: GitHub Actions, TestPyPI, PyPI trusted publishing | [link](./release.md) |
-| ***TODO ADD LINKS TO IMPLEMENATTION EXAMPLES* | link |
+| End-to-end example (`@Thread` / `@Threadable` through codegen) | [link](./Example.md) |

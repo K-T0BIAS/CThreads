@@ -1,19 +1,46 @@
 # Install
 
-cthreads is a Python package with a **native extension**. `pip install` compiles `cthreads._ext` (C++17, pybind11, CMake). Later, the first `cthreads.thread(...)` compiles your `@Thread` kernels with a C++ compiler (no CMake for that step).
+cthreads is a Python package with a **native extension**. Installing from PyPI gives you a wheel (or an sdist that compiles `_ext` with CMake). Later, the first `cthreads.thread(...)` compiles your `@Thread` kernels with a C++ compiler (no CMake for that step).
 
 ## Requirements
 
 | | `pip install` (`_ext`) | First kernel `prepare` / `thread(...)` |
 |---|---|---|
 | Python **3.10+** | yes | yes |
-| C++17 compiler | yes | yes |
-| CMake **3.18+** | yes | no |
-| pybind11 / scikit-build-core | pulled in by pip | no |
+| C++17 compiler | yes (sdist / editable); wheels ship a prebuilt `_ext` on Linux/Windows x86_64 | yes |
+| CMake **3.18+** | yes for sdist / editable; not needed when using a wheel | no |
+| pybind11 / scikit-build-core | pulled in by pip when building from source | no |
 
-You always need a **C++ compiler**. CMake is only for building the installed extension.
+You always need a **C++ compiler** for kernel builds. CMake is only for building the installed `_ext` extension from source.
 
-## Easy path (venv)
+## From PyPI (recommended)
+
+```bash
+python -m venv .venv
+# activate the venv, then:
+python -m pip install -U pip
+python -m pip install cthreads
+```
+
+Check:
+
+```python
+import cthreads
+print(cthreads._ext)   # native module from the wheel (or built from sdist)
+```
+
+Package page: [https://pypi.org/project/cthreads/](https://pypi.org/project/cthreads/).  
+Source and docs: [https://github.com/K-T0BIAS/CThreads](https://github.com/K-T0BIAS/CThreads).
+
+Optional tests (clone the repo, or install the test extra if published):
+
+```bash
+python -m pip install "cthreads[test]"
+# from a clone:
+pytest
+```
+
+## From this repo (editable / contributors)
 
 Use a virtualenv. You can put **CMake and Ninja in the venv** so you do not need a system CMake:
 
@@ -39,9 +66,9 @@ python -m pip install cmake ninja
 python -m pip install -e ".[test]"
 ```
 
-`pip install cmake` installs the Kitware CMake wheel into the venv. With the venv **activated**, `cmake` is on `PATH`, so the isolated `pip install -e .` build can find it. `ninja` is optional; scikit-build-core uses it when present (faster than MSBuild / Make).
+`pip install cmake` installs the Kitware CMake wheel into the venv. With the venv **activated**, `cmake` is on `PATH`, so the isolated build can find it. `ninja` is optional; scikit-build-core uses it when present (faster than MSBuild / Make).
 
-pybind11 and scikit-build-core are **not** something you install by hand. `pyproject.toml` lists them as build-system requires, so pip fetches them when you install cthreads.
+pybind11 and scikit-build-core are **not** something you install by hand for PyPI wheels. For editable installs, `pyproject.toml` lists them as build-system requires so pip fetches them when building.
 
 `.[test]` adds pytest. For a runtime-only editable install:
 
@@ -134,7 +161,7 @@ Calling `thread(..., force=True)` while kernels are still loaded raises. Unload 
 
 ## Publishing to PyPI
 
-Wheels and the sdist are built on GitHub Actions. You do not need a Linux desktop. Walkthrough: [release.md](./release.md).
+Wheels and the sdist are built on GitHub Actions when a GitHub Release is published. End users install with `pip install cthreads` (see [From PyPI](#from-pypi-recommended) above). Maintainer walkthrough: [release.md](./release.md).
 
 ## Next
 
