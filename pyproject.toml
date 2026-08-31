@@ -42,9 +42,6 @@ wheel.packages = [
 wheel.exclude = [
     "**/__pycache__/**",
     "**/*.pyc",
-    "**/*.pyd",
-    "**/*.so",
-    "**/*.dylib",
 ]
 sdist.include = [
     "src/cthreads/cpp/**",
