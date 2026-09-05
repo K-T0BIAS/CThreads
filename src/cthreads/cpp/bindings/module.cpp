@@ -21,6 +21,10 @@
 #include "../headers/pool/threadPool.hpp"
 #include "../headers/shared_host.hpp"
 
+#ifdef CTHREADS_WITH_GPU
+#include "gpu_module.hpp"
+#endif
+
 #include <cstdint>
 #include <atomic>
 #include <condition_variable>
@@ -1255,4 +1259,9 @@ PYBIND11_MODULE(_ext, m) {
 
     bind_linalg(m);
     bind_pool(m);
+
+// runs when the user has the gpu capable version
+#ifdef CTHREADS_WITH_GPU 
+    bind_gpu(m);
+#endif
 }
