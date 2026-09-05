@@ -60,3 +60,5 @@ libcthreads_kernels.dylib
 # <<< cthreads (auto)
 
 todo.md
+# demo artifacts
+*.gif 

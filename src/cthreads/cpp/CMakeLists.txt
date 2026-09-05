@@ -16,6 +16,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Enable locally (pick one shell):
+#   cmd:        set CMAKE_ARGS=-DCTHREADS_GPU=ON
+#   PowerShell: $env:CMAKE_ARGS="-DCTHREADS_GPU=ON"
+#   either:     pip install -e . --config-settings=cmake.define.CTHREADS_GPU=ON
+# Wipe build/ if toggling ON/OFF so CMake reconfigures (cached OFF sticks otherwise).
+option(CTHREADS_GPU "Build Vulkan GPU support into _ext" OFF)
+
 # --- Python + pybind11 -------------------------------------------------------
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
@@ -131,4 +138,21 @@ endif()
 message(STATUS "Python:  ${Python_EXECUTABLE} (${Python_VERSION})")
 if(DEFINED SKBUILD_STATE)
     message(STATUS "SKBUILD_STATE: ${SKBUILD_STATE}")
+endif()
+
+# --- GPU ----
+
+if(CTHREADS_GPU)
+    find_package(Vulkan REQUIRED) # vulkan sdk for headers/includes
+    message(STATUS "cthreads GPU: ON (Vulkan)")
+    target_sources(_ext PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/context.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_module.cpp"
+        # extend more source when implemented (current stage: GPU-01)
+    )
+    target_include_directories(_ext PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/gpu/headers
+        ${Vulkan_INCLUDE_DIRS}
+    )
+    target_compile_definitions(_ext PRIVATE CTHREADS_WITH_GPU=1)
 endif()
