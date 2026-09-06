@@ -39,6 +39,7 @@ chapter as a reference.
 | 13 | [13-map-to-our-code.md](./13-map-to-our-code.md) | Files in `src/cthreads/cpp/gpu/` |
 | 14 | [14-glossary.md](./14-glossary.md) | Terms in one place |
 | 15 | [15-checklist.md](./15-checklist.md) | Concepts a contributor should be able to explain |
+| 16 | [16-api-reference.md](./16-api-reference.md) | Vulkan types, structs, enums, and functions used by cthreads |
 
 ## Official docs (optional later)
 

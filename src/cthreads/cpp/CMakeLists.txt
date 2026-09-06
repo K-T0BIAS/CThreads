@@ -147,11 +147,16 @@ if(CTHREADS_GPU)
     message(STATUS "cthreads GPU: ON (Vulkan)")
     target_sources(_ext PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/context.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/memory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/pack.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/pack_roundtrip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_module.cpp"
-        # extend more source when implemented (current stage: GPU-01)
+    "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_testing_module.cpp"
+        # GPU-02: memory + GpuPack marshal substrate (+ test-only roundtrip bindings)
     )
     target_include_directories(_ext PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu/headers
+        ${CMAKE_CURRENT_SOURCE_DIR}/gpu
         ${Vulkan_INCLUDE_DIRS}
     )
     target_compile_definitions(_ext PRIVATE CTHREADS_WITH_GPU=1)

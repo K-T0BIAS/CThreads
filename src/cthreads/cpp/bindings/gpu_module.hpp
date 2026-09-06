@@ -4,5 +4,5 @@
 
 namespace py = pybind11;
 
-/** Register ``cthreads._ext.gpu`` (Vulkan context probe API). */
+/** Register ``cthreads._ext.gpu`` (probe API + test-only ``testing`` submodule). */
 void bind_gpu(py::module_& parent);

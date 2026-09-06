@@ -8,10 +8,13 @@ from __future__ import annotations
 from .errors import (
     CThreadsGPUError,
     GPUNotAvailable,
+    GpuInvalidArgument,
+    GpuUseAfterDestroy,
     VulkanInitFailed,
     VulkanLoaderNotFound,
     VulkanNoDevice,
     VulkanNotBuiltError,
+    VulkanOutOfMemory,
 )
 
 try:
@@ -26,10 +29,16 @@ def _map_error(exc: BaseException) -> CThreadsGPUError:
         return VulkanLoaderNotFound(msg)
     if "VulkanNoDevice" in msg:
         return VulkanNoDevice(msg)
-    if "VulkanInitFailed" in msg:
-        return VulkanInitFailed(msg)
+    if "VulkanOutOfMemory" in msg:
+        return VulkanOutOfMemory(msg)
+    if "GpuUseAfterDestroy" in msg:
+        return GpuUseAfterDestroy(msg)
+    if "GpuInvalidArgument" in msg:
+        return GpuInvalidArgument(msg)
     if "VulkanNotBuilt" in msg:
         return VulkanNotBuiltError(msg)
+    if "VulkanInitFailed" in msg:
+        return VulkanInitFailed(msg)
     return VulkanInitFailed(msg)
 
 
@@ -74,10 +83,13 @@ def shutdown() -> None:
 __all__ = [
     "CThreadsGPUError",
     "GPUNotAvailable",
+    "GpuInvalidArgument",
+    "GpuUseAfterDestroy",
     "VulkanInitFailed",
     "VulkanLoaderNotFound",
     "VulkanNoDevice",
     "VulkanNotBuiltError",
+    "VulkanOutOfMemory",
     "available",
     "device_name",
     "init",
