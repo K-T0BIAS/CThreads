@@ -5,6 +5,8 @@
 #include <mutex>
 #include <vector>
 
+#include "../headers/memory.hpp"
+
 #if defined(_WIN32)   
     // Windows (32-bit or 64-bit)
     #include <windows.h>
@@ -20,6 +22,93 @@
 namespace cthreads::gpu {
 
 namespace {
+
+    // ------ Hidden TransferEngineHelpers ------
+
+    void shutdown_transfer_engine(Context& c) {
+        // Safe no-op if the engine was never created or already cleared.
+        TransferEngine& te = c.transfer_engine;
+        if (te.command_pool == VK_NULL_HANDLE &&
+            te.fence == VK_NULL_HANDLE &&
+            te.staging.buffer == VK_NULL_HANDLE) {
+            return;
+        }
+
+        // Finish any in-flight copy before freeing GPU objects.
+        if (te.fence != VK_NULL_HANDLE && c.device != VK_NULL_HANDLE &&
+            c.vkWaitForFences) {
+            c.vkWaitForFences(c.device, 1, &te.fence, VK_TRUE, UINT64_MAX);
+        }
+
+        // Staging first (uses device + buffer PFNs), then fence, then pool.
+        if (te.staging.buffer != VK_NULL_HANDLE && c.device != VK_NULL_HANDLE) {
+            memory::destroy_buffer(c, te.staging);
+        }
+        if (te.fence != VK_NULL_HANDLE && c.device != VK_NULL_HANDLE &&
+            c.vkDestroyFence) {
+            c.vkDestroyFence(c.device, te.fence, nullptr);
+            te.fence = VK_NULL_HANDLE;
+        }
+        if (te.command_pool != VK_NULL_HANDLE && c.device != VK_NULL_HANDLE &&
+            c.vkDestroyCommandPool) {
+            c.vkDestroyCommandPool(c.device, te.command_pool, nullptr);
+            te.command_pool = VK_NULL_HANDLE;
+        }
+        te = TransferEngine{};
+    }
+
+    void init_transfer_engine(Context& c) {
+        // Pool + fence only. Staging is allocated later on demand so idle
+        // contexts do not hold a fixed 1 MiB host-visible buffer.
+        if (c.transfer_engine.command_pool != VK_NULL_HANDLE &&
+            c.transfer_engine.fence != VK_NULL_HANDLE) {
+            return;
+        }
+
+        if (c.device == VK_NULL_HANDLE || !c.vkCreateCommandPool ||
+            !c.vkDestroyCommandPool || !c.vkCreateFence || !c.vkDestroyFence) {
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: init_transfer_engine missing "
+                "device or command/fence entry points");
+        }
+
+        // If a previous attempt left a half-built engine, clear it first.
+        if (c.transfer_engine.command_pool != VK_NULL_HANDLE ||
+            c.transfer_engine.fence != VK_NULL_HANDLE ||
+            c.transfer_engine.staging.buffer != VK_NULL_HANDLE) {
+            shutdown_transfer_engine(c);
+        }
+
+        VkCommandPoolCreateInfo pool_info{};
+        pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_info.queueFamilyIndex = c.queue_family;
+        // TRANSIENT: short-lived recordings. RESET: allow vkResetCommandBuffer reuse.
+        pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                          VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        if (c.vkCreateCommandPool(
+                c.device, &pool_info, nullptr, &c.transfer_engine.command_pool) !=
+            VK_SUCCESS) {
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkCreateCommandPool failed");
+        }
+
+        VkFenceCreateInfo fence_info{};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        // Signaled so the first wait/reset path can treat it as "idle".
+        fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        if (c.vkCreateFence(
+                c.device, &fence_info, nullptr, &c.transfer_engine.fence) !=
+            VK_SUCCESS) {
+            c.vkDestroyCommandPool(
+                c.device, c.transfer_engine.command_pool, nullptr);
+            c.transfer_engine.command_pool = VK_NULL_HANDLE;
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkCreateFence failed");
+        }
+    }
+
+    // ------ Hidden Context Helpers ------
+
     // Look up one export inside the already-loaded loader module.
     // module: void* (HMODULE on Windows). name: C string export name.
     // returns: raw code address, or nullptr if missing.
@@ -115,6 +204,9 @@ namespace {
         c.vkGetPhysicalDeviceQueueFamilyProperties =
             get_fn<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
                 c, c.instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+        c.vkGetPhysicalDeviceMemoryProperties =
+            get_fn<PFN_vkGetPhysicalDeviceMemoryProperties>(
+                c, c.instance, "vkGetPhysicalDeviceMemoryProperties");
         c.vkCreateDevice = get_fn<PFN_vkCreateDevice>(
             c, c.instance, "vkCreateDevice");
         c.vkDestroyDevice = get_fn<PFN_vkDestroyDevice>(
@@ -175,11 +267,61 @@ namespace {
         }
         // Queue handle is owned by the device; index 0 of that family.
         c.vkGetDeviceQueue(c.device, c.queue_family, 0, &c.queue);
+
+        // Device-level buffer / memory / transfer entry points (Issue 2).
+        // Resolved after the logical device exists; GIPA still returns loader trampolines.
+        c.vkCreateBuffer = get_fn<PFN_vkCreateBuffer>(
+            c, c.instance, "vkCreateBuffer");
+        c.vkDestroyBuffer = get_fn<PFN_vkDestroyBuffer>(
+            c, c.instance, "vkDestroyBuffer");
+        c.vkGetBufferMemoryRequirements = get_fn<PFN_vkGetBufferMemoryRequirements>(
+            c, c.instance, "vkGetBufferMemoryRequirements");
+        c.vkAllocateMemory = get_fn<PFN_vkAllocateMemory>(
+            c, c.instance, "vkAllocateMemory");
+        c.vkFreeMemory = get_fn<PFN_vkFreeMemory>(
+            c, c.instance, "vkFreeMemory");
+        c.vkBindBufferMemory = get_fn<PFN_vkBindBufferMemory>(
+            c, c.instance, "vkBindBufferMemory");
+        c.vkMapMemory = get_fn<PFN_vkMapMemory>(
+            c, c.instance, "vkMapMemory");
+        c.vkUnmapMemory = get_fn<PFN_vkUnmapMemory>(
+            c, c.instance, "vkUnmapMemory");
+        c.vkCreateCommandPool = get_fn<PFN_vkCreateCommandPool>(
+            c, c.instance, "vkCreateCommandPool");
+        c.vkDestroyCommandPool = get_fn<PFN_vkDestroyCommandPool>(
+            c, c.instance, "vkDestroyCommandPool");
+        c.vkAllocateCommandBuffers = get_fn<PFN_vkAllocateCommandBuffers>(
+            c, c.instance, "vkAllocateCommandBuffers");
+        c.vkFreeCommandBuffers = get_fn<PFN_vkFreeCommandBuffers>(
+            c, c.instance, "vkFreeCommandBuffers");
+        c.vkResetCommandBuffer = get_fn<PFN_vkResetCommandBuffer>(
+            c, c.instance, "vkResetCommandBuffer");
+        c.vkBeginCommandBuffer = get_fn<PFN_vkBeginCommandBuffer>(
+            c, c.instance, "vkBeginCommandBuffer");
+        c.vkEndCommandBuffer = get_fn<PFN_vkEndCommandBuffer>(
+            c, c.instance, "vkEndCommandBuffer");
+        c.vkCmdCopyBuffer = get_fn<PFN_vkCmdCopyBuffer>(
+            c, c.instance, "vkCmdCopyBuffer");
+        c.vkCreateFence = get_fn<PFN_vkCreateFence>(
+            c, c.instance, "vkCreateFence");
+        c.vkDestroyFence = get_fn<PFN_vkDestroyFence>(
+            c, c.instance, "vkDestroyFence");
+        c.vkQueueSubmit = get_fn<PFN_vkQueueSubmit>(
+            c, c.instance, "vkQueueSubmit");
+        c.vkWaitForFences = get_fn<PFN_vkWaitForFences>(
+            c, c.instance, "vkWaitForFences");
+        c.vkResetFences = get_fn<PFN_vkResetFences>(
+            c, c.instance, "vkResetFences");
+
         c.ready = true;
+        // After device + PFNs + ready: reusable copy pool/fence (staging grows later).
+        init_transfer_engine(c);
     }
 
     void shutdown_unlocked(Context& c) {
-    
+        // Children before parents: transfer engine (pool/fence/staging) then device.
+        shutdown_transfer_engine(c);
+
         // 1) release logical device
         if (c.device != VK_NULL_HANDLE && c.vkDestroyDevice) { // check if device is set and if theres a destroy fn for it
             c.vkDestroyDevice(c.device, nullptr);  // set nullptr
@@ -206,6 +348,7 @@ namespace {
         }
     
         // 4) Clear function pointers so a buggy late call can't jump into freed DLL!
+        // instance functions
         c.vkGetInstanceProcAddr = nullptr;
         c.vkCreateInstance = nullptr;
         c.vkDestroyInstance = nullptr;
@@ -215,6 +358,32 @@ namespace {
         c.vkCreateDevice = nullptr;
         c.vkDestroyDevice = nullptr;
         c.vkGetDeviceQueue = nullptr;
+
+        // buffer and memory functions
+        c.vkCreateBuffer = nullptr;
+        c.vkDestroyBuffer = nullptr;
+        c.vkGetBufferMemoryRequirements = nullptr;
+        c.vkAllocateMemory = nullptr;
+        c.vkFreeMemory = nullptr;
+        c.vkBindBufferMemory = nullptr;
+        c.vkMapMemory = nullptr;
+        c.vkUnmapMemory = nullptr;
+        c.vkGetPhysicalDeviceMemoryProperties = nullptr;
+
+        // Command pool, command buffer, copy, and sync functions
+        c.vkCreateCommandPool = nullptr;
+        c.vkDestroyCommandPool = nullptr;
+        c.vkAllocateCommandBuffers = nullptr;
+        c.vkFreeCommandBuffers = nullptr;
+        c.vkResetCommandBuffer = nullptr;
+        c.vkBeginCommandBuffer = nullptr;
+        c.vkEndCommandBuffer = nullptr;
+        c.vkCmdCopyBuffer = nullptr;
+        c.vkCreateFence = nullptr;
+        c.vkDestroyFence = nullptr;
+        c.vkQueueSubmit = nullptr;
+        c.vkWaitForFences = nullptr;
+        c.vkResetFences = nullptr;
     
         c.queue_family = 0;
         c.device_name.clear();

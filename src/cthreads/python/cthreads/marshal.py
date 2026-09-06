@@ -228,7 +228,7 @@ def _pack_c(pack: int | ctypes.c_void_p) -> ctypes.c_void_p:
         return pack
     if not pack:
         raise RuntimeError("cthreads.marshal: null pack pointer")
-    return ctypes.c_void_p(int(pack))
+    return ctypes.c_void_p(int(pack)) # cast to void (trampolines expect a void pointer and static cast internally)
 
 
 def _extra(path: _Path) -> list:

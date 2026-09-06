@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include "gpu_module.hpp"
+#include "gpu_testing_module.hpp"
 
 #include "../gpu/headers/context.hpp"
 
@@ -39,4 +40,8 @@ void bind_gpu(py::module_& parent) {
         &cthreads::gpu::shutdown,
         "Destroy device/instance and unload the Vulkan loader."
     );
+
+    // Test-only pack round-trips live in a separate submodule / translation unit
+    // so product bindings stay small. Not re-exported by cthreads.gpu.
+    bind_gpu_testing(g);
 }

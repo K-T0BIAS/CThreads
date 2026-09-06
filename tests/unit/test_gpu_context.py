@@ -14,10 +14,13 @@ from cthreads import gpu
 from cthreads.gpu.errors import (
     CThreadsGPUError,
     GPUNotAvailable,
+    GpuInvalidArgument,
+    GpuUseAfterDestroy,
     VulkanInitFailed,
     VulkanLoaderNotFound,
     VulkanNoDevice,
     VulkanNotBuiltError,
+    VulkanOutOfMemory,
 )
 
 
@@ -34,6 +37,9 @@ from cthreads.gpu.errors import (
         VulkanLoaderNotFound,
         VulkanNoDevice,
         VulkanInitFailed,
+        VulkanOutOfMemory,
+        GpuInvalidArgument,
+        GpuUseAfterDestroy,
         GPUNotAvailable,
     ],
 )
@@ -62,6 +68,9 @@ def test_gpu_module_exports():
         "VulkanLoaderNotFound",
         "VulkanNoDevice",
         "VulkanInitFailed",
+        "VulkanOutOfMemory",
+        "GpuInvalidArgument",
+        "GpuUseAfterDestroy",
         "GPUNotAvailable",
     ):
         assert hasattr(gpu, name)
@@ -131,6 +140,9 @@ class _FakeGpu:
         ("cthreads.gpu.VulkanLoaderNotFound: vulkan-1.dll not found", VulkanLoaderNotFound),
         ("cthreads.gpu.VulkanNoDevice: no physical devices", VulkanNoDevice),
         ("cthreads.gpu.VulkanInitFailed: vkCreateInstance failed", VulkanInitFailed),
+        ("cthreads.gpu.VulkanOutOfMemory: vkAllocateMemory failed", VulkanOutOfMemory),
+        ("cthreads.gpu.GpuInvalidArgument: size invalid", GpuInvalidArgument),
+        ("cthreads.gpu.GpuUseAfterDestroy: scalar buffer is not initialized", GpuUseAfterDestroy),
         ("cthreads.gpu.VulkanNotBuilt: should not happen from C++", VulkanNotBuiltError),
         ("something else entirely", VulkanInitFailed),
     ],

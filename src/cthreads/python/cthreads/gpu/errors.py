@@ -39,6 +39,27 @@ class VulkanInitFailed(CThreadsGPUError):
         super().__init__(detail)
 
 
+class VulkanOutOfMemory(CThreadsGPUError):
+    """vkAllocateMemory (or related) failed — device/host GPU memory exhausted."""
+
+    def __init__(self, detail: str = "Vulkan out of memory") -> None:
+        super().__init__(detail)
+
+
+class GpuInvalidArgument(CThreadsGPUError):
+    """Bad size, dtype, null pointer, index, or other pack/memory argument error."""
+
+    def __init__(self, detail: str = "Invalid GPU argument") -> None:
+        super().__init__(detail)
+
+
+class GpuUseAfterDestroy(CThreadsGPUError):
+    """Buffer/pack used after destroy or never initialized for the requested op."""
+
+    def __init__(self, detail: str = "GPU resource used after destroy") -> None:
+        super().__init__(detail)
+
+
 class GPUNotAvailable(CThreadsGPUError):
     """Generic: GPU path not usable (not built, no loader, or no device)."""
 

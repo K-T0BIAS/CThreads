@@ -12,3 +12,4 @@
 | `cthreads documentation` | [link](./COMPILER.md) |
 | **Release**: GitHub Actions, TestPyPI, PyPI trusted publishing | [link](./release.md) |
 | End-to-end example (`@Thread` / `@Threadable` through codegen) | [link](./Example.md) |
+| **Vulkan / GPU backend guide** (cthreads compute path, Issues 1+) | [link](./vk_guide/README.md) |
