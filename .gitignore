@@ -17,6 +17,7 @@ dist/
 *.dylib
 .cthreads_cache.json
 .pytest_cache/
+.vscode/
 
 # CMake / MSVC litter - must never land in the source tree
 src/cthreads/cpp/CMakeCache.txt

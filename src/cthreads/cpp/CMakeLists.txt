@@ -149,10 +149,15 @@ if(CTHREADS_GPU)
     "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/context.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/memory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/pack.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader_cache.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/descriptors.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/module.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/pack_roundtrip.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/shader_smoke.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_module.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_testing_module.cpp"
-        # GPU-02: memory + GpuPack marshal substrate (+ test-only roundtrip bindings)
+        # GPU: context, memory, GpuPack, shader cache/entry (+ test-only roundtrip)
     )
     target_include_directories(_ext PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu/headers

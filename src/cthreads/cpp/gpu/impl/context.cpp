@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../headers/memory.hpp"
+#include "../headers/shader_cache.hpp"
 
 #if defined(_WIN32)   
     // Windows (32-bit or 64-bit)
@@ -25,7 +26,8 @@ namespace {
 
     // ------ Hidden TransferEngineHelpers ------
 
-    void shutdown_transfer_engine(Context& c) {
+    // Caller must hold c.transfer_engine_mutex (also used from init while locked).
+    void shutdown_transfer_engine_unlocked(Context& c) {
         // Safe no-op if the engine was never created or already cleared.
         TransferEngine& te = c.transfer_engine;
         if (te.command_pool == VK_NULL_HANDLE &&
@@ -57,7 +59,13 @@ namespace {
         te = TransferEngine{};
     }
 
+    void shutdown_transfer_engine(Context& c) {
+        std::lock_guard<std::mutex> lock(c.transfer_engine_mutex);
+        shutdown_transfer_engine_unlocked(c);
+    }
+
     void init_transfer_engine(Context& c) {
+        std::lock_guard<std::mutex> lock(c.transfer_engine_mutex);
         // Pool + fence only. Staging is allocated later on demand so idle
         // contexts do not hold a fixed 1 MiB host-visible buffer.
         if (c.transfer_engine.command_pool != VK_NULL_HANDLE &&
@@ -76,7 +84,7 @@ namespace {
         if (c.transfer_engine.command_pool != VK_NULL_HANDLE ||
             c.transfer_engine.fence != VK_NULL_HANDLE ||
             c.transfer_engine.staging.buffer != VK_NULL_HANDLE) {
-            shutdown_transfer_engine(c);
+            shutdown_transfer_engine_unlocked(c);
         }
 
         VkCommandPoolCreateInfo pool_info{};
@@ -312,6 +320,41 @@ namespace {
             c, c.instance, "vkWaitForFences");
         c.vkResetFences = get_fn<PFN_vkResetFences>(
             c, c.instance, "vkResetFences");
+        c.vkCreateShaderModule = get_fn<PFN_vkCreateShaderModule>(
+            c, c.instance, "vkCreateShaderModule");
+        c.vkDestroyShaderModule = get_fn<PFN_vkDestroyShaderModule>(
+            c, c.instance, "vkDestroyShaderModule");
+        c.vkCreateDescriptorSetLayout = get_fn<PFN_vkCreateDescriptorSetLayout>(
+            c, c.instance, "vkCreateDescriptorSetLayout");
+        c.vkDestroyDescriptorSetLayout =
+            get_fn<PFN_vkDestroyDescriptorSetLayout>(
+                c, c.instance, "vkDestroyDescriptorSetLayout");
+        c.vkCreatePipelineLayout = get_fn<PFN_vkCreatePipelineLayout>(
+            c, c.instance, "vkCreatePipelineLayout");
+        c.vkDestroyPipelineLayout = get_fn<PFN_vkDestroyPipelineLayout>(
+            c, c.instance, "vkDestroyPipelineLayout");
+        c.vkCreateComputePipelines = get_fn<PFN_vkCreateComputePipelines>(
+            c, c.instance, "vkCreateComputePipelines");
+        c.vkDestroyPipeline = get_fn<PFN_vkDestroyPipeline>(
+            c, c.instance, "vkDestroyPipeline");
+        c.vkCreateDescriptorPool = get_fn<PFN_vkCreateDescriptorPool>(
+            c, c.instance, "vkCreateDescriptorPool");
+        c.vkDestroyDescriptorPool = get_fn<PFN_vkDestroyDescriptorPool>(
+            c, c.instance, "vkDestroyDescriptorPool");
+        c.vkAllocateDescriptorSets = get_fn<PFN_vkAllocateDescriptorSets>(
+            c, c.instance, "vkAllocateDescriptorSets");
+        c.vkFreeDescriptorSets = get_fn<PFN_vkFreeDescriptorSets>(
+            c, c.instance, "vkFreeDescriptorSets");
+        c.vkUpdateDescriptorSets = get_fn<PFN_vkUpdateDescriptorSets>(
+            c, c.instance, "vkUpdateDescriptorSets");
+        c.vkCmdBindPipeline = get_fn<PFN_vkCmdBindPipeline>(
+            c, c.instance, "vkCmdBindPipeline");
+        c.vkCmdBindDescriptorSets = get_fn<PFN_vkCmdBindDescriptorSets>(
+            c, c.instance, "vkCmdBindDescriptorSets");
+        c.vkCmdDispatch = get_fn<PFN_vkCmdDispatch>(
+            c, c.instance, "vkCmdDispatch");
+        c.vkCmdPipelineBarrier = get_fn<PFN_vkCmdPipelineBarrier>(
+            c, c.instance, "vkCmdPipelineBarrier");
 
         c.ready = true;
         // After device + PFNs + ready: reusable copy pool/fence (staging grows later).
@@ -319,8 +362,9 @@ namespace {
     }
 
     void shutdown_unlocked(Context& c) {
-        // Children before parents: transfer engine (pool/fence/staging) then device.
+        // Children before parents: transfer engine, shader cache, then device.
         shutdown_transfer_engine(c);
+        shader::ShaderCache::getInstance().clear(c);
 
         // 1) release logical device
         if (c.device != VK_NULL_HANDLE && c.vkDestroyDevice) { // check if device is set and if theres a destroy fn for it
@@ -384,6 +428,23 @@ namespace {
         c.vkQueueSubmit = nullptr;
         c.vkWaitForFences = nullptr;
         c.vkResetFences = nullptr;
+        c.vkCreateShaderModule = nullptr;
+        c.vkDestroyShaderModule = nullptr;
+        c.vkCreateDescriptorSetLayout = nullptr;
+        c.vkDestroyDescriptorSetLayout = nullptr;
+        c.vkCreatePipelineLayout = nullptr;
+        c.vkDestroyPipelineLayout = nullptr;
+        c.vkCreateComputePipelines = nullptr;
+        c.vkDestroyPipeline = nullptr;
+        c.vkCreateDescriptorPool = nullptr;
+        c.vkDestroyDescriptorPool = nullptr;
+        c.vkAllocateDescriptorSets = nullptr;
+        c.vkFreeDescriptorSets = nullptr;
+        c.vkUpdateDescriptorSets = nullptr;
+        c.vkCmdBindPipeline = nullptr;
+        c.vkCmdBindDescriptorSets = nullptr;
+        c.vkCmdDispatch = nullptr;
+        c.vkCmdPipelineBarrier = nullptr;
     
         c.queue_family = 0;
         c.device_name.clear();

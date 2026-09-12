@@ -73,7 +73,7 @@ Host must insert the same padding or use `alignas`.
 Do not put `float x[];` inside the scalar block when you also need `y[]`.
 Unsized arrays in std430 must be last, and you only get one.
 
-That is another reason cthreads option 5 uses **separate list SSBOs**.
+That is another reason cthreads uses **separate list SSBOs**.
 
 ## How codegen will help later
 

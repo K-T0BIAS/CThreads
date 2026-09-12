@@ -33,7 +33,7 @@ Use this after reading. If a concept cannot be explained in plain language, revi
 - [ ] cthreads binding 0 = scalars, 1..N = lists convention
 - [ ] What std430 padding is and why host/GPU must match
 - [ ] SPIR-V vs GLSL vs pipeline vs dispatch
-- [ ] What GpuPack contains (option 5)
+- [ ] What GpuPack contains (binding convention)
 - [ ] Why GPU jobs are launch/wait only (no mid-run sync)
 
 ## When stuck

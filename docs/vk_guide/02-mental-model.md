@@ -118,7 +118,7 @@ Python cthreads.gpu / future gpu()
 pybind _ext.gpu
         |
         v
-GpuPack (option 5)
+GpuPack (binding convention)
         |
         v
 memory:: create/upload/download

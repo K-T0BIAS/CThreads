@@ -1,4 +1,4 @@
-# 12 — GpuPack and marshal (option 5 end-to-end)
+# 12 - GpuPack and marshal (binding convention end-to-end)
 
 ## Definition
 

@@ -48,7 +48,7 @@ Python list[float]  <--writeback-- staging <--copy-- device-local SSBO
 
 ## Why not one giant buffer for everything?
 
-cthreads uses **option 5**:
+cthreads uses this binding convention:
 
 | Piece | Where it lives |
 |-------|----------------|
@@ -81,7 +81,7 @@ That matches how GPUs want to work: record work, submit, wait once.
 |-------|----------------|
 | Context | Talk to Vulkan: instance, device, queue, entry points |
 | Memory helpers | Allocate buffers, staging upload/download |
-| GpuPack | Option 5: scalar SSBO + per-list SSBOs; marshal/writeback |
+| GpuPack | Scalar SSBO + per-list SSBOs; marshal/writeback |
 | Launch path | Descriptors, pipeline, dispatch, `GpuJob.join` |
 | `@Gpu` / `gpu()` | Compile and run user kernels (same typing model as CPU) |
 | Workloads / packaging | Real numeric steps, docs, CI, capability gates |
