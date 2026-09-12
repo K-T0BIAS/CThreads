@@ -115,6 +115,71 @@ namespace {
         }
     }
 
+    // ------ Hidden LaunchEngine helpers ------
+
+    void shutdown_launch_engine_unlocked(Context& c) {
+        LaunchEngine& le = c.launch_engine;
+        if (le.command_pool == VK_NULL_HANDLE &&
+            le.free_command_buffers.empty() &&
+            le.free_fences.empty()) {
+            return;
+        }
+
+        if (c.device != VK_NULL_HANDLE && c.vkDestroyFence) {
+            for (VkFence fence : le.free_fences) {
+                if (fence != VK_NULL_HANDLE) {
+                    c.vkDestroyFence(c.device, fence, nullptr);
+                }
+            }
+        }
+        le.free_fences.clear();
+        // Destroying the pool frees every CB allocated from it (idle and any
+        // still checked out if shutdown races a live job — process teardown).
+        le.free_command_buffers.clear();
+        if (le.command_pool != VK_NULL_HANDLE && c.device != VK_NULL_HANDLE &&
+            c.vkDestroyCommandPool) {
+            c.vkDestroyCommandPool(c.device, le.command_pool, nullptr);
+        }
+        le.command_pool = VK_NULL_HANDLE;
+    }
+
+    void shutdown_launch_engine(Context& c) {
+        std::lock_guard<std::mutex> lock(c.launch_engine_mutex);
+        shutdown_launch_engine_unlocked(c);
+    }
+
+    void init_launch_engine(Context& c) {
+        std::lock_guard<std::mutex> lock(c.launch_engine_mutex);
+        if (c.launch_engine.command_pool != VK_NULL_HANDLE) {
+            return;
+        }
+
+        if (c.device == VK_NULL_HANDLE || !c.vkCreateCommandPool ||
+            !c.vkDestroyCommandPool) {
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: init_launch_engine missing "
+                "device or command pool entry points");
+        }
+
+        if (!c.launch_engine.free_command_buffers.empty() ||
+            !c.launch_engine.free_fences.empty()) {
+            shutdown_launch_engine_unlocked(c);
+        }
+
+        VkCommandPoolCreateInfo pool_info{};
+        pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_info.queueFamilyIndex = c.queue_family;
+        // RESET: checkout path calls vkResetCommandBuffer before re-record.
+        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        if (c.vkCreateCommandPool(
+                c.device, &pool_info, nullptr, &c.launch_engine.command_pool) !=
+            VK_SUCCESS) {
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkCreateCommandPool failed for "
+                "LaunchEngine");
+        }
+    }
+
     // ------ Hidden Context Helpers ------
 
     // Look up one export inside the already-loaded loader module.
@@ -357,12 +422,14 @@ namespace {
             c, c.instance, "vkCmdPipelineBarrier");
 
         c.ready = true;
-        // After device + PFNs + ready: reusable copy pool/fence (staging grows later).
+        // After device + PFNs + ready: reusable copy + launch pools.
         init_transfer_engine(c);
+        init_launch_engine(c);
     }
 
     void shutdown_unlocked(Context& c) {
-        // Children before parents: transfer engine, shader cache, then device.
+        // Children before parents: launch engine, transfer engine, shader cache, then device.
+        shutdown_launch_engine(c);
         shutdown_transfer_engine(c);
         shader::ShaderCache::getInstance().clear(c);
 
@@ -503,5 +570,115 @@ namespace {
         std::lock_guard<std::mutex> lock(gpu_mutex());
         shutdown_unlocked(context());
     }
+
+
+LaunchResources checkout_launch_resources(Context& context) {
+    std::lock_guard<std::mutex> lock(context.launch_engine_mutex);
+    LaunchEngine& le = context.launch_engine;
+    if (!context.ready || le.command_pool == VK_NULL_HANDLE) {
+        throw std::runtime_error(
+            "cthreads.gpu.VulkanInitFailed: checkout_launch_resources needs a "
+            "ready LaunchEngine");
+    }
+    if (!context.vkAllocateCommandBuffers || !context.vkResetCommandBuffer ||
+        !context.vkCreateFence || !context.vkResetFences) {
+        throw std::runtime_error(
+            "cthreads.gpu.VulkanInitFailed: checkout_launch_resources missing "
+            "command/fence entry points");
+    }
+
+    LaunchResources out{};
+
+    if (!le.free_command_buffers.empty()) {
+        out.command_buffer = le.free_command_buffers.back();
+        le.free_command_buffers.pop_back();
+        if (context.vkResetCommandBuffer(out.command_buffer, 0) != VK_SUCCESS) {
+            le.free_command_buffers.push_back(out.command_buffer);
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkResetCommandBuffer failed in "
+                "checkout_launch_resources");
+        }
+    } else {
+        VkCommandBufferAllocateInfo alloc_info{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.commandPool = le.command_pool;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandBufferCount = 1;
+        if (context.vkAllocateCommandBuffers(
+                context.device, &alloc_info, &out.command_buffer) !=
+            VK_SUCCESS) {
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkAllocateCommandBuffers failed "
+                "in checkout_launch_resources");
+        }
+    }
+
+    if (!le.free_fences.empty()) {
+        out.fence = le.free_fences.back();
+        le.free_fences.pop_back();
+        if (context.vkResetFences(context.device, 1, &out.fence) != VK_SUCCESS) {
+            le.free_fences.push_back(out.fence);
+            le.free_command_buffers.push_back(out.command_buffer);
+            out = LaunchResources{};
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkResetFences failed in "
+                "checkout_launch_resources");
+        }
+    } else {
+        VkFenceCreateInfo fence_info{};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (context.vkCreateFence(
+                context.device, &fence_info, nullptr, &out.fence) !=
+            VK_SUCCESS) {
+            le.free_command_buffers.push_back(out.command_buffer);
+            out.command_buffer = VK_NULL_HANDLE;
+            throw std::runtime_error(
+                "cthreads.gpu.VulkanInitFailed: vkCreateFence failed in "
+                "checkout_launch_resources");
+        }
+    }
+
+    return out;
+}
+
+void return_launch_resources(Context& context, LaunchResources& resources) {
+    std::lock_guard<std::mutex> lock(context.launch_engine_mutex);
+    LaunchEngine& le = context.launch_engine;
+    if (resources.command_buffer != VK_NULL_HANDLE) {
+        le.free_command_buffers.push_back(resources.command_buffer);
+        resources.command_buffer = VK_NULL_HANDLE;
+    }
+    if (resources.fence != VK_NULL_HANDLE) {
+        le.free_fences.push_back(resources.fence);
+        resources.fence = VK_NULL_HANDLE;
+    }
+}
+
+void submit_launch(
+    Context& context,
+    VkCommandBuffer command_buffer,
+    VkFence fence
+) {
+    std::lock_guard<std::mutex> lock(context.launch_engine_mutex);
+    if (!context.ready || !context.queue || !context.vkQueueSubmit) {
+        throw std::runtime_error(
+            "cthreads.gpu.VulkanInitFailed: submit_launch needs a ready queue");
+    }
+    if (command_buffer == VK_NULL_HANDLE || fence == VK_NULL_HANDLE) {
+        throw std::runtime_error(
+            "cthreads.gpu.GpuInvalidArgument: submit_launch null command buffer "
+            "or fence");
+    }
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &command_buffer;
+    if (context.vkQueueSubmit(context.queue, 1, &submit, fence) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "cthreads.gpu.VulkanInitFailed: vkQueueSubmit failed in "
+            "submit_launch");
+    }
+}
 
 } // namespace cthreads::gpu

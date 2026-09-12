@@ -39,34 +39,23 @@ size_t std430_align_of(const std::string& kind) {
 }
 
 void release_inflight(Context& context, SpawnedGpuKernel& job) {
-    // Destroying the pool frees any CBs allocated from it; free first when we can.
-    if (job.command_buffer != VK_NULL_HANDLE &&
-        job.command_pool != VK_NULL_HANDLE &&
-        context.device != VK_NULL_HANDLE &&
-        context.vkFreeCommandBuffers) { // free the cmd buffer when all relevant ressources are valid
-        context.vkFreeCommandBuffers(
-            context.device, job.command_pool, 1, &job.command_buffer);
+    // Return checked-out CB + fence to LaunchEngine (do not destroy the pool).
+    if (job.command_buffer != VK_NULL_HANDLE || job.fence != VK_NULL_HANDLE) {
+        LaunchResources resources{};
+        resources.command_buffer = job.command_buffer;
+        resources.fence = job.fence;
+        job.command_buffer = VK_NULL_HANDLE;
+        job.fence = VK_NULL_HANDLE;
+        job.command_pool = VK_NULL_HANDLE;
+        return_launch_resources(context, resources);
+    } else {
+        job.command_pool = VK_NULL_HANDLE;
     }
-    job.command_buffer = VK_NULL_HANDLE;
-
-    // Per-launch command pool (not the TransferEngine pool).
-    if (job.command_pool != VK_NULL_HANDLE &&
-        context.device != VK_NULL_HANDLE &&
-        context.vkDestroyCommandPool) {
-        context.vkDestroyCommandPool(context.device, job.command_pool, nullptr);
-    }
-    job.command_pool = VK_NULL_HANDLE;
 
     if (job.descriptor_set != VK_NULL_HANDLE) { // free the descriptors (if not freed yet)
         pack::free_set(context, job.descriptor_pool, job.descriptor_set);
     }
     pack::destroy_pool(context, job.descriptor_pool);
-    // destroy the fence if not already done
-    if (job.fence != VK_NULL_HANDLE && context.device != VK_NULL_HANDLE &&
-        context.vkDestroyFence) {
-        context.vkDestroyFence(context.device, job.fence, nullptr);
-    }
-    job.fence = VK_NULL_HANDLE;
     // destroy the pack
     pack::destroy_gpu_pack(context, job.pack);
     job.symbol.clear(); // clear the symbol
@@ -640,44 +629,20 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
         pack::update_descriptors(
             context, job->descriptor_set, entry, job->pack);
 
-        // Need bind/dispatch/barrier + the usual CB/submit PFNs.
-        if (!context.vkCreateCommandPool || !context.vkDestroyCommandPool ||
-            !context.vkAllocateCommandBuffers || !context.vkFreeCommandBuffers ||
-            !context.vkBeginCommandBuffer || !context.vkEndCommandBuffer ||
+        // Need bind/dispatch/barrier PFNs (CB/fence come from LaunchEngine).
+        if (!context.vkBeginCommandBuffer || !context.vkEndCommandBuffer ||
             !context.vkCmdPipelineBarrier || !context.vkCmdBindPipeline ||
-            !context.vkCmdBindDescriptorSets || !context.vkCmdDispatch ||
-            !context.vkCreateFence || !context.vkDestroyFence ||
-            !context.vkQueueSubmit || !context.queue) {
+            !context.vkCmdBindDescriptorSets || !context.vkCmdDispatch) {
             throw std::runtime_error(
                 "cthreads.gpu.VulkanInitFailed: launch_gpu_kernel missing "
-                "dispatch/command/fence entry points or queue");
+                "dispatch/command entry points");
         }
 
-        // Per-job command pool: own lifetime, no TransferEngine mutex needed.
-        VkCommandPoolCreateInfo pool_info{};
-        pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        pool_info.queueFamilyIndex = context.queue_family;
-        pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-        if (context.vkCreateCommandPool(
-                context.device, &pool_info, nullptr, &job->command_pool) !=
-            VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkCreateCommandPool failed in "
-                "launch_gpu_kernel");
-        }
-
-        VkCommandBufferAllocateInfo alloc_info{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc_info.commandPool = job->command_pool;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc_info.commandBufferCount = 1;
-        if (context.vkAllocateCommandBuffers(
-                context.device, &alloc_info, &job->command_buffer) !=
-            VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkAllocateCommandBuffers failed "
-                "in launch_gpu_kernel");
-        }
+        // Checkout CB + fence from Context LaunchEngine (pool is process-lifetime).
+        LaunchResources launch = checkout_launch_resources(context);
+        job->command_buffer = launch.command_buffer;
+        job->fence = launch.fence;
+        job->command_pool = context.launch_engine.command_pool;
 
         VkCommandBufferBeginInfo begin_info{};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -734,27 +699,8 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 "launch_gpu_kernel");
         }
 
-        // Per-job fence (not TransferEngine.fence). Unsignaled until submit done.
-        VkFenceCreateInfo fence_info{};
-        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        if (context.vkCreateFence(
-                context.device, &fence_info, nullptr, &job->fence) !=
-            VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkCreateFence failed in "
-                "launch_gpu_kernel");
-        }
-
-        VkSubmitInfo submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &job->command_buffer;
-        if (context.vkQueueSubmit(
-                context.queue, 1, &submit, job->fence) != VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkQueueSubmit failed in "
-                "launch_gpu_kernel");
-        }
+        // Fence was checked out unsignaled; submit under launch_engine_mutex.
+        submit_launch(context, job->command_buffer, job->fence);
         // Do not wait here — join() waits on job->fence.
     } catch (...) {
         // Tear down any handles already stashed; then rethrow to Python.

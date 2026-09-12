@@ -37,9 +37,9 @@ struct Context;
  * - pack: GpuPack = device-local scalar + list SSBOs for this launch.
  * - descriptor_pool: DescriptorPool = pool that allocated descriptor_set (for free_set).
  * - descriptor_set: VkDescriptorSet = bindings wired to pack buffers.
- * - command_buffer: VkCommandBuffer = recorded dispatch (optional until submit path).
- * - command_pool: VkCommandPool = pool that owns command_buffer (for free).
- * - fence: VkFence = signals when the submitted dispatch has finished.
+ * - command_buffer: VkCommandBuffer = checked out from Context LaunchEngine.
+ * - command_pool: VkCommandPool = Context launch pool (borrowed; not destroyed on join).
+ * - fence: VkFence = checked out per job; returned to LaunchEngine after wait.
  * - symbol: string = shader cache key for this kernel.
  * - group_count_x/y/z: uint32_t = vkCmdDispatch workgroup counts.
  * - values_keep: shared_ptr to py::list = Python args kept alive for list writeback.

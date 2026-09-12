@@ -19,7 +19,7 @@ Public `gpu()` / `@Gpu` (later) will call these same types. Tests exercise them 
 
 - Fence: CPU waits until the submitted dispatch has finished.
 - Writeback: copy device list SSBOs back into the kept Python `list` objects (`pass_as` ref).
-- Per-job command pool: short-lived pool that owns the launch command buffer (not the TransferEngine pool).
+- Per-job command buffer + fence: checked out from Context `LaunchEngine` for the job lifetime; returned on join (supports overlapping launches). The command **pool** is process-lifetime on Context.
 
 ## Struct `SpawnedGpuKernel`
 
