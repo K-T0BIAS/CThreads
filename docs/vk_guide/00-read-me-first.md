@@ -76,7 +76,7 @@ Same idea (SSBO = storage buffer), more paperwork.
 
 ## Locked decisions in this project (so generic tutorials do not confuse contributors)
 
-1. **Option 5 pack:** one scalar SSBO + one SSBO per `list`.
+1. **Binding convention pack:** one scalar SSBO + one SSBO per `list`.
 2. **Device-local** data for shaders; **staging** for CPU copies.
 3. **Descriptors** bind buffers by binding index (not pointers in the scalar struct).
 4. **Launch then join** — no mid-run Python `__sync_state` on GPU.

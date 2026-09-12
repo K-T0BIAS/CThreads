@@ -40,7 +40,7 @@ enum class BufferKind : uint8_t {
 /**
  * One contiguous byte region on the GPU (staging scratch, scalar SSBO, or one list).
  *
- * Owns the Vulkan buffer object and the device memory bound to it. Option 5 packs
+ * Owns the Vulkan buffer object and the device memory bound to it. GpuPacks
  * use several device-local GpuBuffers: one for all scalars, then one per list.
  *
  * #### Fields:

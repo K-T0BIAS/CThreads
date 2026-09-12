@@ -34,7 +34,7 @@
 | **Pipeline (compute)** | Prepared compute shader + layout |
 | **Dispatch** | Launch compute workgroups (`vkCmdDispatch`) |
 | **Workgroup / local size** | Group of invocations that run together |
-| **GpuPack** | Per-launch scalar SSBO + list SSBOs (option 5) |
+| **GpuPack** | Per-launch scalar SSBO + list SSBOs (binding convention) |
 | **Marshal** | Copy Python values into native/GPU pack storage |
 | **Writeback** | Copy native/GPU results into the same Python objects |
 | **Join** | Wait for GPU job completion then writeback |

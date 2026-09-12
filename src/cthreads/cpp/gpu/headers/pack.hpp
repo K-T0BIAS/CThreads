@@ -11,8 +11,9 @@ struct Context;
 }
 
 /**
- * Option 5 GpuPack: one device-local scalar SSBO plus one device-local SSBO per
+ * GpuPack: one device-local scalar SSBO plus one device-local SSBO per
  * list/container. Host traffic goes through memory:: upload/download helpers.
+ * Descriptor helpers wire a pack into a per-launch descriptor set for dispatch.
  *
  * This is a generic runtime bag of buffers. Per-kernel std430 layout and which
  * Python arg maps to which slot are marshal/codegen concerns, not this type.
@@ -49,7 +50,7 @@ struct ContainerSlot {
 };
 
 /**
- * Per-launch GPU argument pack (option 5).
+ * Per-launch GPU argument pack (binding convention: scalars then lists).
  *
  * Owns Vulkan allocations until destroy_gpu_pack. Returning GpuPack by value
  * moves handles only; device bytes are not copied.

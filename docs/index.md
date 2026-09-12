@@ -12,4 +12,6 @@
 | `cthreads documentation` | [link](./COMPILER.md) |
 | **Release**: GitHub Actions, TestPyPI, PyPI trusted publishing | [link](./release.md) |
 | End-to-end example (`@Thread` / `@Threadable` through codegen) | [link](./Example.md) |
-| **Vulkan / GPU backend guide** (cthreads compute path, Issues 1+) | [link](./vk_guide/README.md) |
+| **Vulkan / GPU backend guide** (cthreads compute path) | [link](./vk_guide/README.md) |
+| **Internals:** GPU C++ modules (Context → launch/join) | [link](./internals/gpu/README.md) |
+| **Future:** CPU `@Thread` launching GPU (after Python `gpu()` is done) | [link](./gpu_future_cpu_to_gpu.md) |

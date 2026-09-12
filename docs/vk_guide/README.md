@@ -6,7 +6,7 @@ shaders, and launch/wait — **not** the full graphics stack (swapchains, render
 passes, images, and so on).
 
 Architecture choices here match the cthreads GPU design (same Python types as the
-CPU backend, GpuPack option 5, device-local + staging). Implementation status in
+CPU backend, GpuPack binding convention, device-local + staging). Implementation status in
 the tree may move faster or slower than any particular roadmap document; treat
 this guide as the conceptual reference, and the source under `src/cthreads/cpp/gpu/`
 as ground truth for what is already landed.
@@ -35,7 +35,7 @@ chapter as a reference.
 | 09 | [09-descriptors-ssbo.md](./09-descriptors-ssbo.md) | How shaders see buffers |
 | 10 | [10-std430-layouts.md](./10-std430-layouts.md) | Scalar struct packing |
 | 11 | [11-spirv-pipelines-dispatch.md](./11-spirv-pipelines-dispatch.md) | Shaders, pipelines, `dispatch` |
-| 12 | [12-gpupack-marshal.md](./12-gpupack-marshal.md) | Option 5 pack end-to-end |
+| 12 | [12-gpupack-marshal.md](./12-gpupack-marshal.md) | GpuPack end-to-end |
 | 13 | [13-map-to-our-code.md](./13-map-to-our-code.md) | Files in `src/cthreads/cpp/gpu/` |
 | 14 | [14-glossary.md](./14-glossary.md) | Terms in one place |
 | 15 | [15-checklist.md](./15-checklist.md) | Concepts a contributor should be able to explain |

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <mutex>
 
 namespace cthreads::gpu::memory {
 
@@ -28,6 +29,7 @@ void require_ready(const Context& context, const char* where) {
 }
 
 void require_transfer_engine(const Context& context, const char* where) {
+    // assumes the engine mutex is locked
     if (context.transfer_engine.command_pool == VK_NULL_HANDLE ||
         context.transfer_engine.fence == VK_NULL_HANDLE) {
         throw std::runtime_error(
@@ -37,6 +39,7 @@ void require_transfer_engine(const Context& context, const char* where) {
 }
 
 // GPU copy via Context TransferEngine pool + fence, then CPU wait.
+// Caller must hold context.transfer_engine_mutex for the whole call.
 void copy_buffer_and_wait(
     Context& context,
     VkBuffer src,
@@ -289,7 +292,7 @@ void destroy_buffer(Context& context, GpuBuffer& buffer) {
 namespace {
 
 // Grow-only host-visible scratch on the TransferEngine. Never shrinks until
-// Context shutdown. Safe because upload/download wait on the engine fence.
+// Context shutdown. Caller must hold context.transfer_engine_mutex.
 void ensure_staging(Context& context, VkDeviceSize size) {
     TransferEngine& te = context.transfer_engine;
     if (te.staging.buffer != VK_NULL_HANDLE && te.staging.size >= size &&
@@ -311,7 +314,6 @@ void upload_buffer(
     VkDeviceSize size
 ) {
     require_ready(context, "upload_buffer");
-    require_transfer_engine(context, "upload_buffer");
     if (buffer.kind != BufferKind::DeviceLocal ||
         buffer.buffer == VK_NULL_HANDLE) {
         throw std::runtime_error(
@@ -327,7 +329,9 @@ void upload_buffer(
             "cthreads.gpu.GpuInvalidArgument: upload_buffer size invalid");
     }
 
-    // Host -> engine staging (memcpy) -> device-local (GPU copy).
+    // One lock for engine check, staging grow, host memcpy, and GPU copy.
+    std::lock_guard<std::mutex> lock(context.transfer_engine_mutex);
+    require_transfer_engine(context, "upload_buffer");
     ensure_staging(context, size);
     GpuBuffer& staging = context.transfer_engine.staging;
     std::memcpy(staging.mapped, data, static_cast<size_t>(size));
@@ -341,7 +345,6 @@ void download_buffer(
     VkDeviceSize size
 ) {
     require_ready(context, "download_buffer");
-    require_transfer_engine(context, "download_buffer");
     if (buffer.kind != BufferKind::DeviceLocal ||
         buffer.buffer == VK_NULL_HANDLE) {
         throw std::runtime_error(
@@ -357,7 +360,9 @@ void download_buffer(
             "cthreads.gpu.GpuInvalidArgument: download_buffer size invalid");
     }
 
-    // Device-local -> engine staging (GPU copy) -> host (memcpy).
+    // One lock for engine check, staging grow, GPU copy, and host memcpy.
+    std::lock_guard<std::mutex> lock(context.transfer_engine_mutex);
+    require_transfer_engine(context, "download_buffer");
     ensure_staging(context, size);
     GpuBuffer& staging = context.transfer_engine.staging;
     copy_buffer_and_wait(context, buffer.buffer, staging.buffer, size);

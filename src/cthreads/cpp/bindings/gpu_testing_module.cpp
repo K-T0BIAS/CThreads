@@ -5,6 +5,7 @@
 #include "gpu_testing_module.hpp"
 
 #include "../gpu/testing/pack_roundtrip.hpp"
+#include "../gpu/testing/shader_smoke.hpp"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -72,5 +73,41 @@ void bind_gpu_testing(py::module_& gpu_parent) {
         "probe_use_after_destroy_scalars",
         &cthreads::gpu::testing::probe_use_after_destroy_scalars,
         "Raises GpuUseAfterDestroy (upload into pack with no scalar buffer). Test-only."
+    );
+
+    t.def(
+        "smoke_create_entry",
+        &cthreads::gpu::testing::smoke_create_entry,
+        "create_entry + destroy for committed smoke SPIR-V. Test-only."
+    );
+    t.def(
+        "smoke_update_descriptors",
+        &cthreads::gpu::testing::smoke_update_descriptors,
+        "create_entry + pack + update_descriptors smoke. Test-only."
+    );
+    t.def(
+        "smoke_cache_register_and_get",
+        &cthreads::gpu::testing::smoke_cache_register_and_get,
+        "ShaderCache add/get/clear smoke. Test-only."
+    );
+    t.def(
+        "probe_cache_duplicate_add",
+        &cthreads::gpu::testing::probe_cache_duplicate_add,
+        "Raises on duplicate ShaderCache add. Test-only."
+    );
+    t.def(
+        "probe_update_empty_list_slot",
+        &cthreads::gpu::testing::probe_update_empty_list_slot,
+        "Raises GpuInvalidArgument for empty list descriptor. Test-only."
+    );
+    t.def(
+        "probe_create_entry_zero_bindings",
+        &cthreads::gpu::testing::probe_create_entry_zero_bindings,
+        "Raises GpuInvalidArgument for binding_count 0. Test-only."
+    );
+    t.def(
+        "smoke_launch_saxpy",
+        &cthreads::gpu::testing::smoke_launch_saxpy,
+        "Register smoke SPIR-V, launch_gpu_kernel saxpy, join writeback, check y. Test-only."
     );
 }

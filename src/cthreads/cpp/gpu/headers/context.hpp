@@ -2,6 +2,7 @@
 #include <vulkan/vulkan.h>
 #include <string>
 #include <cstdint>
+#include <mutex>
 
 #include "memory.hpp"
 
@@ -69,6 +70,28 @@ struct Context {
     PFN_vkWaitForFences vkWaitForFences = nullptr; // blocks the CPU until the given fences signal
     PFN_vkResetFences vkResetFences = nullptr; // resets fences back to unsignaled for reuse
 
+    // Shader / pipeline create + destroy (entry build and ShaderCache::clear).
+    PFN_vkCreateShaderModule vkCreateShaderModule = nullptr;
+    PFN_vkDestroyShaderModule vkDestroyShaderModule = nullptr;
+    PFN_vkCreateDescriptorSetLayout vkCreateDescriptorSetLayout = nullptr;
+    PFN_vkDestroyDescriptorSetLayout vkDestroyDescriptorSetLayout = nullptr;
+    PFN_vkCreatePipelineLayout vkCreatePipelineLayout = nullptr;
+    PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout = nullptr;
+    PFN_vkCreateComputePipelines vkCreateComputePipelines = nullptr;
+    PFN_vkDestroyPipeline vkDestroyPipeline = nullptr;
+
+    // Descriptor pool / set / update (per-launch wiring of GpuPack buffers).
+    PFN_vkCreateDescriptorPool vkCreateDescriptorPool = nullptr;
+    PFN_vkDestroyDescriptorPool vkDestroyDescriptorPool = nullptr;
+    PFN_vkAllocateDescriptorSets vkAllocateDescriptorSets = nullptr;
+    PFN_vkFreeDescriptorSets vkFreeDescriptorSets = nullptr;
+    PFN_vkUpdateDescriptorSets vkUpdateDescriptorSets = nullptr;
+
+    // Compute dispatch recording (launch_gpu_kernel command buffers).
+    PFN_vkCmdBindPipeline vkCmdBindPipeline = nullptr;
+    PFN_vkCmdBindDescriptorSets vkCmdBindDescriptorSets = nullptr;
+    PFN_vkCmdDispatch vkCmdDispatch = nullptr;
+    PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = nullptr;
 
     // Opaque Vulkan handles.
     VkInstance instance = VK_NULL_HANDLE;           // connection to the loader/app
@@ -82,7 +105,9 @@ struct Context {
     // True only after init() fully succeeded.
     bool ready = false;
 
+    // These are both temporary until the cpu side @gpu calls are implemented (this however is a future poject and not on the current timeline)
     TransferEngine transfer_engine;
+    std::mutex transfer_engine_mutex;
 };
 // Process-wide singleton accessor.
 Context& context();

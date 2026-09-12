@@ -36,7 +36,7 @@ That means:
 
 On the C++ side, binding 1's descriptor must reference the `VkBuffer` that holds those floats.
 
-## cthreads binding convention (option 5)
+## cthreads binding convention
 
 | Binding | Contents |
 |---------|----------|
@@ -62,7 +62,7 @@ No pointers inside `Scalars`. Bindings do the wiring.
 | `STORAGE_BUFFER` | `buffer { ... }` (read/write) |
 | `UNIFORM_BUFFER` | `uniform` block (we avoid for mutable pack) |
 
-cthreads uses **storage buffers for scalars and lists** (option 5 = all SSBO).
+cthreads uses **storage buffers for scalars and lists** (binding convention = all SSBO).
 
 ## Lifecycle sketch (launch path)
 
