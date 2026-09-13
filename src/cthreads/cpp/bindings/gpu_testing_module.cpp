@@ -106,8 +106,14 @@ void bind_gpu_testing(py::module_& gpu_parent) {
         "Raises GpuInvalidArgument for binding_count 0. Test-only."
     );
     t.def(
-        "smoke_launch_saxpy",
-        &cthreads::gpu::testing::smoke_launch_saxpy,
-        "Register smoke SPIR-V, launch_gpu_kernel saxpy, join writeback, check y. Test-only."
+        "clear_shader_cache",
+        &cthreads::gpu::testing::clear_shader_cache,
+        "Clear process ShaderCache. Test-only teardown."
+    );
+    t.def(
+        "register_smoke_saxpy",
+        &cthreads::gpu::testing::register_smoke_saxpy,
+        "Register smoke saxpy SPIR-V in ShaderCache; returns symbol key. "
+        "Does not launch - use _ext.gpu.launch_gpu_kernel. Test-only."
     );
 }

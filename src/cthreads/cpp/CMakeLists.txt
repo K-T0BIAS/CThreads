@@ -145,19 +145,41 @@ endif()
 if(CTHREADS_GPU)
     find_package(Vulkan REQUIRED) # vulkan sdk for headers/includes
     message(STATUS "cthreads GPU: ON (Vulkan)")
+
+    # Vendor Khronos glslang (GLSL -> SPIR-V). Same compiler engine shaderc uses.
+    # Linked statically into _ext so end users need no glslc / extra SDK tools.
+    include(FetchContent)
+    set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+    set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+    set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CTEST OFF CACHE BOOL "" FORCE)
+    set(SKIP_GLSLANG_INSTALL ON CACHE BOOL "" FORCE)
+    set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GLSLANG_JS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glslang
+        GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+        GIT_TAG        15.1.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(glslang)
+    message(STATUS "cthreads GPU: vendored glslang for compile_glsl")
+
     target_sources(_ext PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/context.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/memory.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/pack.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader_cache.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/descriptors.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/module.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/pack_roundtrip.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/shader_smoke.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_module.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_testing_module.cpp"
-        # GPU: context, memory, GpuPack, shader cache/entry (+ test-only roundtrip)
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/context.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/memory.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/pack.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader_cache.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/descriptors.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/module.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/compile_glsl.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/pack_roundtrip.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/shader_smoke.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_module.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_testing_module.cpp"
     )
     target_include_directories(_ext PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu/headers
@@ -165,4 +187,42 @@ if(CTHREADS_GPU)
         ${Vulkan_INCLUDE_DIRS}
     )
     target_compile_definitions(_ext PRIVATE CTHREADS_WITH_GPU=1)
+    target_link_libraries(_ext PRIVATE
+        glslang
+        SPIRV
+        glslang-default-resource-limits
+    )
+
+    # Ship upstream license texts next to the Python package (Apache/BSD notices).
+    set(_cthreads_gpu_notices_out
+        "${_cthreads_py_out}/gpu/third_party_notices")
+    set(_cthreads_gpu_notices_src
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/third_party_notices")
+    file(MAKE_DIRECTORY "${_cthreads_gpu_notices_out}")
+    if(EXISTS "${_cthreads_gpu_notices_src}/README.md")
+        configure_file(
+            "${_cthreads_gpu_notices_src}/README.md"
+            "${_cthreads_gpu_notices_out}/README.md"
+            COPYONLY
+        )
+    endif()
+    if(DEFINED glslang_SOURCE_DIR)
+        foreach(_lic IN ITEMS LICENSE.txt LICENSE.TXT LICENSE)
+            if(EXISTS "${glslang_SOURCE_DIR}/${_lic}")
+                configure_file(
+                    "${glslang_SOURCE_DIR}/${_lic}"
+                    "${_cthreads_gpu_notices_out}/glslang-${_lic}"
+                    COPYONLY
+                )
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(DEFINED SKBUILD AND NOT (DEFINED SKBUILD_STATE AND SKBUILD_STATE STREQUAL "editable"))
+        install(DIRECTORY "${_cthreads_gpu_notices_out}/"
+            DESTINATION cthreads/gpu/third_party_notices
+            OPTIONAL
+        )
+    endif()
 endif()

@@ -1,5 +1,6 @@
 #include "../headers/shader_cache.hpp"
 #include "../headers/context.hpp"
+#include "../headers/shader.hpp"
 
 #include <stdexcept>
 #include <utility>
@@ -118,6 +119,17 @@ void ShaderCache::clear(Context& context) {
         destroy_entry(context, entry);
     }
     _cache.clear();
+}
+
+const ShaderCacheEntry& ShaderRegistry::register_spirv(
+    Context& context,
+    const std::string& symbol,
+    const uint32_t* spirv,
+    size_t spirv_word_count,
+    uint32_t binding_count
+) {
+    ShaderCacheEntry entry = create_entry(context, spirv, spirv_word_count, binding_count);
+    return ShaderCache::getInstance().add(symbol, std::move(entry));
 }
 
 } // namespace cthreads::gpu::shader

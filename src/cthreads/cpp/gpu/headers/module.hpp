@@ -61,7 +61,8 @@ struct SpawnedGpuKernel {
         size_t value_index = 0;     // index into values_keep
         size_t container_index = 0; // index into pack.container_slots
         size_t numel = 0;
-        std::string elem_kind;      // "float" / "int" / "double"
+        std::string elem_kind;      // "float" / "int" / "double" / "bool"
+
     };
 
     pack::GpuPack pack{};

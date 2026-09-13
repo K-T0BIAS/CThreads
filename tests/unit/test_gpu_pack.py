@@ -12,14 +12,14 @@ import struct
 import pytest
 
 from cthreads import gpu
-from cthreads.gpu.errors import (
+from cthreads.gpu.frontend.errors import (
     GpuInvalidArgument,
     GpuUseAfterDestroy,
 )
 
 
 def _ext_gpu():
-    return gpu._gpu
+    return gpu._ext_gpu_api._gpu
 
 
 def _require_gpu_testing():
@@ -48,7 +48,7 @@ def test_public_gpu_has_no_pack_roundtrip_exports():
 
 
 def test_testing_submodule_absent_when_not_built(monkeypatch):
-    monkeypatch.setattr(gpu, "_gpu", None)
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", None)
     assert _ext_gpu() is None
 
 

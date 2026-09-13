@@ -13,7 +13,9 @@ Depends on: [Context](./context.md), [Pack](./pack.md), [Descriptors](./descript
 
 `launch_gpu_kernel` is the GPU analogue of CPU `spawn_from_meta`: build a `GpuPack`, wire descriptors, record bind+dispatch, submit with a fence, and return a job handle. `SpawnedGpuKernel::join` waits on that fence, downloads ref lists into the same Python objects, then releases Vulkan state. There is no OS worker thread and no mid-run `sync_state`.
 
-Public `gpu()` / `@Gpu` (later) will call these same types. Tests exercise them today via `_ext.gpu.testing.smoke_launch_saxpy`.
+Public `gpu()` / `@Gpu` (later) will call these same types. Product pybind:
+`_ext.gpu.launch_gpu_kernel` + `_ext.gpu.GpuJob`. Tests register smoke SPIR-V
+via `_ext.gpu.testing.register_smoke_saxpy`, then launch on the product path.
 
 ## Technical terms
 
@@ -49,4 +51,6 @@ Value scalars are not written back. Threadable/schema marshal is later.
 
 ## Testing
 
-`smoke_launch_saxpy` registers committed saxpy SPIR-V, launches, joins, and asserts `y` matches CPU saxpy. Pytest: `tests/unit/test_gpu_shader.py::test_live_smoke_launch_saxpy`.
+`register_smoke_saxpy` puts committed saxpy SPIR-V in ShaderCache (test-only).
+Pytest drives product `launch_gpu_kernel` + `GpuJob.join` and asserts `y`:
+`tests/unit/test_gpu_shader.py::test_live_launch_saxpy_product_path`.

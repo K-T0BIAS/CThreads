@@ -142,10 +142,14 @@ void update_descriptors(
             "cthreads.gpu.GpuInvalidArgument: update_descriptors binding_count "
             "must be >= 1");
     }
-    if (binding_count != 1u + static_cast<uint32_t>(pack.container_slots.size())) {
+    const bool has_scalars = (pack.scalar_buffer.buffer != VK_NULL_HANDLE);
+    const uint32_t expected =
+        (has_scalars ? 1u : 0u) +
+        static_cast<uint32_t>(pack.container_slots.size());
+    if (binding_count != expected) {
         throw std::runtime_error(
             "cthreads.gpu.GpuInvalidArgument: update_descriptors binding_count "
-            "must equal 1 + container_slots.size()");
+            "must equal (scalars?1:0) + container_slots.size()");
     }
     if (!context.vkUpdateDescriptorSets) {
         throw std::runtime_error(
@@ -160,11 +164,12 @@ void update_descriptors(
     for (uint32_t i = 0; i < binding_count; ++i) {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceSize size = 0;
-        if (i == 0) {
+        if (has_scalars && i == 0) {
             buffer = pack.scalar_buffer.buffer;
             size = pack.scalar_buffer.size;
         } else {
-            const ContainerSlot& slot = pack.container_slots[i - 1];
+            const uint32_t list_i = has_scalars ? (i - 1u) : i;
+            const ContainerSlot& slot = pack.container_slots[list_i];
             buffer = slot.buffer.buffer;
             size = slot.buffer.size;
         }

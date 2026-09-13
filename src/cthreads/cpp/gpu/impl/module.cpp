@@ -219,6 +219,18 @@ void writeback_ref_lists(Context& context, SpawnedGpuKernel& job) {
             for (size_t j = 0; j < slot.numel; ++j) {
                 list_val[j] = host[j];
             }
+        } else if (slot.elem_kind == "bool") {
+            // GLSL bool is std430 32-bit 0/1 (same packing as scalar bool).
+            std::vector<std::int32_t> host(slot.numel);
+            pack::download_container(
+                context,
+                job.pack,
+                slot.container_index,
+                host.data(),
+                host.size() * sizeof(std::int32_t));
+            for (size_t j = 0; j < slot.numel; ++j) {
+                list_val[j] = host[j] != 0;
+            }
         } else if (slot.elem_kind == "double") {
             std::vector<double> host(slot.numel);
             pack::download_container(
@@ -551,7 +563,7 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 context, job->pack, scalar_host.data(), scalar_bytes);
         }
 
-        // Upload each list container (binding 1..N) from ordered_values.
+        // Upload each list container from ordered_values (pack slot order).
         for (size_t c = 0; c < container_plans.size(); ++c) {
             const ContainerSlotPlan& plan = container_plans[c];
             if (plan.numel == 0) {
@@ -573,6 +585,18 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 std::vector<std::int32_t> host(plan.numel);
                 for (size_t j = 0; j < plan.numel; ++j) {
                     host[j] = list_val[j].cast<std::int32_t>();
+                }
+                pack::upload_container(
+                    context,
+                    job->pack,
+                    c,
+                    host.data(),
+                    host.size() * sizeof(std::int32_t));
+            } else if (plan.elem_kind == "bool") {
+                // std430 bool = 4 bytes; coerce Python bool to 0/1 int32.
+                std::vector<std::int32_t> host(plan.numel);
+                for (size_t j = 0; j < plan.numel; ++j) {
+                    host[j] = list_val[j].cast<bool>() ? 1 : 0;
                 }
                 pack::upload_container(
                     context,
@@ -602,13 +626,15 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
         const shader::ShaderCacheEntry& entry =
             shader::ShaderCache::getInstance().get(symbol);
 
-        // binding_count on the entry must match 1 + number of list slots
+        // binding_count = (scalars ? 1 : 0) + list count (matches Python Signature)
         const uint32_t expected_bindings =
-            1u + static_cast<uint32_t>(container_specs.size());
+            (scalar_bytes > 0 ? 1u : 0u) +
+            static_cast<uint32_t>(container_specs.size());
         if (entry.binding_count != expected_bindings) {
             throw std::runtime_error(
                 "cthreads.gpu.GpuInvalidArgument: ShaderCacheEntry binding_count (" +
-                std::to_string(entry.binding_count) + ") != 1 + list count (" +
+                std::to_string(entry.binding_count) +
+                ") != (scalars?1:0) + list count (" +
                 std::to_string(expected_bindings) + ")");
         }
         if (entry.pipeline == VK_NULL_HANDLE ||

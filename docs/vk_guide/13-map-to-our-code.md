@@ -46,8 +46,8 @@ Newcomer-oriented C++ module docs: [docs/internals/gpu/README.md](../internals/g
 
 1. Read guide 09-12.
 2. Open `pack.hpp` / `descriptors.hpp` / `shader_cache.hpp` / `module.hpp`.
-3. Trace `smoke_launch_saxpy` in `gpu/testing/shader_smoke.cpp` end-to-end.
-4. Run `tests/unit/test_gpu_shader.py::test_live_smoke_launch_saxpy`.
+3. Trace product `launch_gpu_kernel` after `testing.register_smoke_saxpy`.
+4. Run `tests/unit/test_gpu_shader.py::test_live_launch_saxpy_product_path`.
 
 ## Build flag reminder
 

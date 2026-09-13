@@ -47,12 +47,14 @@ def test_write_if_changed_writes_then_skips(tmp_path: Path):
 def test_load_cache_missing_and_corrupt(tmp_path: Path):
     empty = load_cache(tmp_path)
     assert empty["units"] == {}
+    assert empty["gpu_units"] == {}
     assert empty["link_hash"] is None
 
     bad = tmp_path / CACHE_FILENAME
     bad.write_text("{not json", encoding="utf-8")
     recovered = load_cache(tmp_path)
     assert recovered["units"] == {}
+    assert recovered["gpu_units"] == {}
 
 
 def test_load_cache_wrong_version(tmp_path: Path):
@@ -63,12 +65,39 @@ def test_load_cache_wrong_version(tmp_path: Path):
     )
     data = load_cache(tmp_path)
     assert data["units"] == {}
+    assert data["gpu_units"] == {}
+
+
+def test_load_cache_fills_missing_gpu_units(tmp_path: Path):
+    path = cache_path_for_root(tmp_path)
+    path.write_text(
+        json.dumps(
+            {
+                "version": REGISTRY.VERSION,
+                "units": {"move": {"src_hash": "abc"}},
+                "link_hash": None,
+                "binary": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    data = load_cache(tmp_path)
+    assert data["units"]["move"]["src_hash"] == "abc"
+    assert data["gpu_units"] == {}
 
 
 def test_save_and_load_cache_roundtrip(tmp_path: Path):
-    save_cache(tmp_path, {"units": {"move": {"src_hash": "abc"}}, "link_hash": "L"})
+    save_cache(
+        tmp_path,
+        {
+            "units": {"move": {"src_hash": "abc"}},
+            "gpu_units": {"saxpy": {"src_hash": "def"}},
+            "link_hash": "L",
+        },
+    )
     data = load_cache(tmp_path)
     assert data["units"]["move"]["src_hash"] == "abc"
+    assert data["gpu_units"]["saxpy"]["src_hash"] == "def"
     assert data["link_hash"] == "L"
     assert data["version"] == REGISTRY.VERSION
 
@@ -89,6 +118,7 @@ def test_ensure_gitignore_creates_and_is_idempotent(tmp_path: Path):
     assert ensure_gitignore(tmp_path) is True
     text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert "__Thread__/" in text
+    assert "__Gpu__/" in text
     assert ".cthreads_cache.json" in text
     assert "cthreads_kernels.dll" in text
     assert ensure_gitignore(tmp_path) is False

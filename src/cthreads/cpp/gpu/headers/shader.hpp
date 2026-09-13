@@ -22,7 +22,7 @@ struct Context;
  * - SPIR-V: binary compute shader (uint32 words). Built for tests as committed
  *   bytes or via shaderc; @Gpu emit feeds the same helper later.
  * - binding_count: STORAGE_BUFFER bindings for the binding convention
- *   (1 = scalars only, or 1 + number of list SSBOs).
+ *   ((scalars ? 1 : 0) + number of list SSBOs; at least 1 total).
  * - ShaderCacheEntry: module + set layout + pipeline layout + compute pipeline.
  */
 namespace cthreads::gpu::shader {
@@ -34,8 +34,8 @@ namespace cthreads::gpu::shader {
  * binding_count-1 as STORAGE_BUFFER), pipeline layout, compute pipeline.
  * On failure, destroys any objects already created and throws.
  *
- * Does not insert into ShaderCache; the registry (or test harness) calls
- * ShaderCache::add with the returned entry.
+ * Does not insert into ShaderCache; ShaderRegistry::register_spirv calls
+ * create_entry then ShaderCache::add.
  *
  * #### Parameters:
  * - context: Context& = initialized GPU context with device and create entry points.
