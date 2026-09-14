@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from helpers_gpu import glsl_compiler_available
+
 from cthreads.gpu import GlobalIdx
 from cthreads.gpu.compiler.translation.spirv import compile_glsl_to_spirv
 from cthreads.gpu.compiler.translation.translate import translate_function_for_gpu
@@ -18,17 +20,9 @@ void main() {
 """
 
 
-def _compiler_available() -> bool:
-    try:
-        compile_glsl_to_spirv(_MIN_COMP)
-        return True
-    except RuntimeError:
-        return False
-
-
 pytestmark = pytest.mark.skipif(
-    not _compiler_available(),
-    reason="no native compile_glsl / glslc available",
+    not glsl_compiler_available(),
+    reason="no GLSL compiler (skipped on GitHub Actions / CPU-only builds)",
 )
 
 

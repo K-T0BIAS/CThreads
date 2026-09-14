@@ -4,21 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+from helpers_gpu import glsl_compiler_available
+
 from cthreads.gpu.compiler.translation.spirv import compile_glsl_to_spirv
 from cthreads.gpu.compiler.translation.translate import translate_function_for_gpu
 
-
-def _compiler_available() -> bool:
-    try:
-        compile_glsl_to_spirv(
-            "#version 450\nlayout(local_size_x = 1) in;\nvoid main() {}\n"
-        )
-        return True
-    except RuntimeError:
-        return False
+pytestmark = pytest.mark.skipif(
+    not glsl_compiler_available(),
+    reason="no GLSL compiler (skipped on GitHub Actions / CPU-only builds)",
+)
 
 
-@pytest.mark.skipif(not _compiler_available(), reason="no GLSL compiler")
 @pytest.mark.parametrize(
     "param",
     [
@@ -48,7 +44,6 @@ def test_reserved_list_param_names_fail_with_hint(param, tmp_module):
         translate_function_for_gpu(mod.k, compile_spirv=True)
 
 
-@pytest.mark.skipif(not _compiler_available(), reason="no GLSL compiler")
 def test_safe_param_names_compile(tmp_module):
     mod = tmp_module(
         """
@@ -67,7 +62,6 @@ def test_safe_param_names_compile(tmp_module):
     assert "} ys;" in r.source
 
 
-@pytest.mark.skipif(not _compiler_available(), reason="no GLSL compiler")
 def test_compile_error_includes_hint():
     with pytest.raises(RuntimeError, match="Hint:.*reserved"):
         compile_glsl_to_spirv("#version 450\nvoid main() { not_a_type x; }\n")

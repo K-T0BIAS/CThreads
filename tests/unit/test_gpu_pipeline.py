@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from helpers_gpu import prepare_module
+from helpers_gpu import glsl_compiler_available, prepare_module
 
 from cthreads.frontend.Registry import REGISTRY
 from cthreads.gpu import GlobalIdx, Gpu, ThreadIdx, available, gpu, shutdown
@@ -32,6 +32,10 @@ def _reset():
     prepare_mod._gpu_prepared = False
 
 
+@pytest.mark.skipif(
+    not glsl_compiler_available(),
+    reason="no GLSL compiler (skipped on GitHub Actions / CPU-only builds)",
+)
 def test_pipeline_translate_source_is_shaderc_ready():
     def saxpy(n: int, a: float, x: list[float], y: list[float]) -> None:
         i: int = GlobalIdx.x
