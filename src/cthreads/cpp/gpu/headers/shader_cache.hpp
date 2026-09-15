@@ -10,10 +10,6 @@ namespace cthreads::gpu {
 struct Context;
 }
 
-namespace cthreads::gpu::testing {
-struct ShaderCacheTestAccess;
-}
-
 /**
  * Shader cache: reusable per-symbol Vulkan pipeline objects.
  *
@@ -35,10 +31,10 @@ namespace cthreads::gpu::shader {
  *
  * #### Fields:
  * - shader_module: VkShaderModule = SPIR-V module (may be null after pipeline create).
- * - set_layout: VkDescriptorSetLayout = bindings 0 scalars, 1..N lists.
+ * - set_layout: VkDescriptorSetLayout = bindings 0..N-1 (scalars at 0 if present, then lists).
  * - pipeline_layout: VkPipelineLayout = layout used to create the compute pipeline.
  * - pipeline: VkPipeline = compute pipeline ready to bind.
- * - binding_count: uint32_t = number of STORAGE_BUFFER bindings (1 + list count).
+ * - binding_count: uint32_t = STORAGE_BUFFER bindings ((scalars?1:0) + list count).
  */
 struct ShaderCacheEntry {
     VkShaderModule shader_module = VK_NULL_HANDLE;
@@ -55,9 +51,41 @@ struct ShaderCacheEntry {
 };
 
 /**
+ * Sole writer into ShaderCache (create_entry + add).
+ *
+ * Python reaches this via `_ext.gpu.register_shader`. Tests and future native
+ * callers use the same type - do not friend other writers or call add() directly.
+ */
+struct ShaderRegistry {
+    /**
+     * Build a pipeline entry from SPIR-V and insert it under `symbol`.
+     *
+     * #### Parameters:
+     * - context: Context& = ready GPU context
+     * - symbol: string = ShaderCache key (kernel name)
+     * - spirv: const uint32_t* = SPIR-V words
+     * - spirv_word_count: size_t = word count
+     * - binding_count: uint32_t = SSBO binding count (>= 1)
+     *
+     * #### Returns:
+     * - const ShaderCacheEntry& = entry stored in the cache
+     *
+     * #### Throws:
+     * - runtime_error = create_entry failure or duplicate symbol
+     */
+    static const ShaderCacheEntry& register_spirv(
+        cthreads::gpu::Context& context,
+        const std::string& symbol,
+        const uint32_t* spirv,
+        size_t spirv_word_count,
+        uint32_t binding_count
+    );
+};
+
+/**
  * Process-wide map of kernel symbol -> reusable pipeline objects.
  *
- * Writers (registry, later) call add. Everyone else only get / clear.
+ * Writers: ShaderRegistry only. Everyone else: get / clear.
  * Entries are immutable after insert; clear runs on Context shutdown.
  */
 class ShaderCache {
@@ -68,7 +96,7 @@ private:
     ShaderCache() = default;
     ~ShaderCache();
 
-    // Registry-only once a friend exists. Duplicate key throws.
+    // ShaderRegistry-only. Duplicate key throws.
     const ShaderCacheEntry& add(const std::string& key, ShaderCacheEntry&& entry);
 
 public:
@@ -87,8 +115,7 @@ public:
     void clear(cthreads::gpu::Context& context);
 
     friend struct cthreads::gpu::Context; // shutdown / future access
-    // Test-only access to private add (see gpu/testing/shader_smoke.cpp).
-    friend struct cthreads::gpu::testing::ShaderCacheTestAccess;
+    friend struct ShaderRegistry;
 };
 
 } // namespace cthreads::gpu::shader

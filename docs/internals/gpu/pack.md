@@ -97,4 +97,7 @@ destroy_gpu_pack
 
 ## Testing today
 
-`_ext.gpu.testing` exposes pack round-trip helpers (float and int packs) and `smoke_launch_saxpy` (full launch + join writeback). Pytest: `tests/unit/test_gpu_pack.py`, `tests/unit/test_gpu_shader.py`.
+`_ext.gpu.testing` exposes pack round-trip helpers (float and int packs) and
+`register_smoke_saxpy` (SPIR-V cache only). Launch/join use product
+`_ext.gpu.launch_gpu_kernel`. Pytest: `tests/unit/test_gpu_pack.py`,
+`tests/unit/test_gpu_shader.py`.

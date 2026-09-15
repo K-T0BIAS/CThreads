@@ -37,9 +37,9 @@ struct Context;
  * - pack: GpuPack = device-local scalar + list SSBOs for this launch.
  * - descriptor_pool: DescriptorPool = pool that allocated descriptor_set (for free_set).
  * - descriptor_set: VkDescriptorSet = bindings wired to pack buffers.
- * - command_buffer: VkCommandBuffer = recorded dispatch (optional until submit path).
- * - command_pool: VkCommandPool = pool that owns command_buffer (for free).
- * - fence: VkFence = signals when the submitted dispatch has finished.
+ * - command_buffer: VkCommandBuffer = checked out from Context LaunchEngine.
+ * - command_pool: VkCommandPool = Context launch pool (borrowed; not destroyed on join).
+ * - fence: VkFence = checked out per job; returned to LaunchEngine after wait.
  * - symbol: string = shader cache key for this kernel.
  * - group_count_x/y/z: uint32_t = vkCmdDispatch workgroup counts.
  * - values_keep: shared_ptr to py::list = Python args kept alive for list writeback.
@@ -61,7 +61,8 @@ struct SpawnedGpuKernel {
         size_t value_index = 0;     // index into values_keep
         size_t container_index = 0; // index into pack.container_slots
         size_t numel = 0;
-        std::string elem_kind;      // "float" / "int" / "double"
+        std::string elem_kind;      // "float" / "int" / "double" / "bool"
+
     };
 
     pack::GpuPack pack{};
@@ -80,6 +81,12 @@ struct SpawnedGpuKernel {
     std::shared_ptr<py::list> values_keep;
     // Ref list slots only; value scalars are not written back.
     std::vector<WritebackListSlot> writeback_lists;
+
+    // Parallel to pack.container_slots: true => destroy_buffer on release.
+    // False => borrowed from GpuState; handles cleared without destroy.
+    std::vector<uint8_t> container_owned;
+    // GpuState names marked in_use for this launch; released in release_inflight.
+    std::vector<std::string> resident_names;
 
     bool finished = false;
     std::mutex done_mu;
@@ -101,13 +108,15 @@ struct SpawnedGpuKernel {
     void start();
 
     /**
-     * Wait until the GPU fence signals, then download/writeback and release
-     * inflight GPU objects. Rethrows eptr if set. Idempotent after finished.
+     * Wait until the GPU fence signals, optionally download/writeback, then
+     * release inflight GPU objects. Rethrows eptr if set. Idempotent after finished.
      *
      * #### Parameters:
      * - context: Context& = same device that created pack / submitted work.
+     * - download: bool = if true (default), download ref lists into values_keep.
+     *   If false, skip writeback (resident buffers stay device-authoritative).
      */
-    void join(Context& context);
+    void join(Context& context, bool download = true);
 
     /**
      * Block until done_flag is set (join or failure path). Does not download.

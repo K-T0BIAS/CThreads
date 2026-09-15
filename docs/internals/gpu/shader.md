@@ -25,7 +25,8 @@ Per-launch objects (GpuPack buffers, descriptor sets, fences) are not stored her
 
 ## Access rights
 
-- Writers (registry / testing, via `add` once friended): insert new entries.
+- Writers: `ShaderRegistry::register_spirv` only (friend of `ShaderCache`; also
+  exposed as `_ext.gpu.register_shader`). Tests use the same writer.
 - Everyone else: `get` returns a const reference.
 - Context shutdown: `clear` destroys all Vulkan objects, then empties the map.
 

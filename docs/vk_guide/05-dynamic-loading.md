@@ -81,4 +81,4 @@ When adding a new Vulkan call in `memory.cpp`, first check: is its `PFN_` on `Co
 | `VulkanNoDevice` | No compute-capable GPU |
 | `VulkanInitFailed: vkCreate… failed` | Driver rejected create |
 
-Python maps these string prefixes to exception types in `cthreads.gpu.errors`.
+Python maps these string prefixes to exception types in `cthreads.gpu.frontend.errors`.
