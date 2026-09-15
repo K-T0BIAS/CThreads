@@ -7,16 +7,20 @@
 
 #include "../gpu/headers/context.hpp"
 #include "../gpu/headers/compile_glsl.hpp"
+#include "../gpu/headers/memory.hpp"
 #include "../gpu/headers/module.hpp"
 #include "../gpu/headers/shader_cache.hpp"
+#include "../gpu/headers/state.hpp"
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace py = pybind11;
@@ -63,10 +67,12 @@ void bind_gpu(py::module_& parent) {
         )
         .def(
             "join",
-            [](cthreads::gpu::SpawnedGpuKernel& self) {
-                self.join(cthreads::gpu::context());
+            [](cthreads::gpu::SpawnedGpuKernel& self, bool download) {
+                self.join(cthreads::gpu::context(), download);
             },
-            "Wait for the GPU fence, download ref lists, release inflight state."
+            py::arg("download") = true,
+            "Wait for the GPU fence; if download=True, write ref lists back, then "
+            "release inflight state."
         )
         .def(
             "done",
@@ -140,6 +146,126 @@ void bind_gpu(py::module_& parent) {
         "Does not wait; call job.join() for fence wait and list writeback. "
         "Requires the kernel symbol to already be in ShaderCache."
     );
+
+    // Named device-local buffer registry (singleton). Not a public DeviceBuffer:
+    // Python only sees names + sizes; VkBuffer stays inside the registry.
+    py::class_<
+        cthreads::gpu::memory::GpuState,
+        std::unique_ptr<
+            cthreads::gpu::memory::GpuState,
+            py::nodelete>>(g, "GpuState")
+        .def_static(
+            "instance",
+            []() -> cthreads::gpu::memory::GpuState& {
+                return cthreads::gpu::memory::GpuState::getInstance();
+            },
+            py::return_value_policy::reference,
+            "Process-wide GpuState singleton."
+        )
+        .def(
+            "contains",
+            &cthreads::gpu::memory::GpuState::contains,
+            py::arg("name"),
+            "True if name is already registered."
+        )
+        .def(
+            "size",
+            &cthreads::gpu::memory::GpuState::size,
+            "Number of registered buffers."
+        )
+        .def(
+            "names",
+            &cthreads::gpu::memory::GpuState::names,
+            "Snapshot of registered names (order is not meaningful)."
+        )
+        .def(
+            "add",
+            [](cthreads::gpu::memory::GpuState& self,
+               const std::string& name,
+               std::uint64_t nbytes) {
+                cthreads::gpu::init();
+                auto buffer = cthreads::gpu::memory::create_buffer(
+                    cthreads::gpu::context(),
+                    static_cast<VkDeviceSize>(nbytes),
+                    cthreads::gpu::memory::BufferKind::DeviceLocal
+                );
+                self.add(name, std::move(buffer));
+            },
+            py::arg("name"),
+            py::arg("nbytes"),
+            "Allocate a device-local buffer of nbytes and register it under name. "
+            "Duplicate or empty names raise."
+        )
+        .def(
+            "remove",
+            [](cthreads::gpu::memory::GpuState& self, const std::string& name) {
+                self.remove(cthreads::gpu::context(), name);
+            },
+            py::arg("name"),
+            "Destroy and unregister name. Raises if unknown or in_use."
+        )
+        .def(
+            "buffer_size",
+            [](cthreads::gpu::memory::GpuState& self, const std::string& name) {
+                return static_cast<std::uint64_t>(self.get(name).size);
+            },
+            py::arg("name"),
+            "Byte size of the buffer registered under name."
+        )
+        .def(
+            "is_in_use",
+            &cthreads::gpu::memory::GpuState::is_in_use,
+            py::arg("name"),
+            "True if name is checked out for a launch."
+        )
+        .def(
+            "mark_in_use",
+            &cthreads::gpu::memory::GpuState::mark_in_use,
+            py::arg("name"),
+            "Check out name for a launch. Raises if unknown or already in_use."
+        )
+        .def(
+            "release_in_use",
+            &cthreads::gpu::memory::GpuState::release_in_use,
+            py::arg("name"),
+            "Clear in_use after a launch finishes. Raises if unknown or not in_use."
+        )
+        .def(
+            "upload",
+            [](cthreads::gpu::memory::GpuState& self,
+               const std::string& name,
+               const py::bytes& data) {
+                cthreads::gpu::init();
+                const std::string raw = data;
+                self.upload(
+                    cthreads::gpu::context(),
+                    name,
+                    raw.empty() ? nullptr : raw.data(),
+                    static_cast<VkDeviceSize>(raw.size())
+                );
+            },
+            py::arg("name"),
+            py::arg("data"),
+            "Upload host bytes into a registered device-local buffer (H2D)."
+        )
+        .def(
+            "download",
+            [](cthreads::gpu::memory::GpuState& self, const std::string& name) {
+                cthreads::gpu::init();
+                const std::uint64_t nbytes = static_cast<std::uint64_t>(
+                    self.get(name).size);
+                std::string raw(static_cast<size_t>(nbytes), '\0');
+                self.download(
+                    cthreads::gpu::context(),
+                    name,
+                    raw.empty() ? nullptr : raw.data(),
+                    static_cast<VkDeviceSize>(nbytes)
+                );
+                return py::bytes(raw);
+            },
+            py::arg("name"),
+            "Download a registered device-local buffer into bytes (D2H)."
+        );
 
     // Test-only pack round-trips live in a separate submodule / translation unit
     // so product bindings stay small. Not re-exported by cthreads.gpu.

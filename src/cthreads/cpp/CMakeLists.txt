@@ -172,6 +172,7 @@ if(CTHREADS_GPU)
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/memory.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/pack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader_cache.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/state.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/shader.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/descriptors.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/module.cpp"

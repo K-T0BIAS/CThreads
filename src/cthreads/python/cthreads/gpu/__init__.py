@@ -31,6 +31,7 @@ from .frontend import (
     init,
     shutdown,
 )
+from .arena import GpuArena
 from .runtime import GpuJob, compile, gpu, prepare
 
 
@@ -42,6 +43,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "Gpu",
+    "GpuArena",
     "GpuJob",
     "BlockDim",
     "BlockIdx",

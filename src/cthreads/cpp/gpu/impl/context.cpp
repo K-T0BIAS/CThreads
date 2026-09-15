@@ -7,6 +7,7 @@
 
 #include "../headers/memory.hpp"
 #include "../headers/shader_cache.hpp"
+#include "../headers/state.hpp"
 
 #if defined(_WIN32)   
     // Windows (32-bit or 64-bit)
@@ -428,9 +429,11 @@ namespace {
     }
 
     void shutdown_unlocked(Context& c) {
-        // Children before parents: launch engine, transfer engine, shader cache, then device.
+        // Children before parents: launch engine, transfer engine, named
+        // GpuState buffers, shader cache, then device.
         shutdown_launch_engine(c);
         shutdown_transfer_engine(c);
+        memory::GpuState::getInstance().clear(c);
         shader::ShaderCache::getInstance().clear(c);
 
         // 1) release logical device

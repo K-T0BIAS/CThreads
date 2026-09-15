@@ -171,3 +171,19 @@ def register_shader(symbol: str, spirv: bytes, binding_count: int) -> None:
     - Exception = native create/insert failures (unmapped)
     """
     _require_ext_gpu().register_shader(symbol, spirv, binding_count)
+
+
+def gpu_state() -> Any:
+    """
+    Return the process-wide native GpuState singleton.
+
+    Named device-local buffers live here outside of a single launch. Does not
+    expose Vulkan handles; use `add(name, nbytes)` / `remove(name)` / etc.
+
+    #### Returns
+    - Any = native `_ext.gpu.GpuState`
+
+    #### Raises
+    - RuntimeError = `_ext.gpu` is not built
+    """
+    return _require_ext_gpu().GpuState.instance()

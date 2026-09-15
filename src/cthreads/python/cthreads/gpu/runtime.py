@@ -9,8 +9,9 @@ from typing import Any, Callable
 
 from ..job import Job
 from . import _ext_gpu_api
+from .arena import lookup_resident
 from .compiler.orchestrator import GpuCompileSession
-from .frontend.errors import GPUNotAvailable, _map_error
+from .frontend.errors import GPUNotAvailable, GpuInvalidArgument, _map_error
 from .gpu_kernel_meta import build_gpu_kernel_meta
 from .gpu_marshal import infer_group_count_x, ordered_values_for_meta
 
@@ -23,6 +24,31 @@ class GpuJob(Job):
     """
     Job wrapper for native GpuJob handles (void kernels; `result()` is None).
     """
+
+    def join(self, download: bool = True) -> None:
+        """
+        Wait for the GPU fence; optionally write ref lists back into Python.
+
+        #### Args:
+        - download: bool = if True (default), download ref lists on join.
+          If False, skip writeback (use GpuArena.sync for resident lists).
+
+        #### Returns
+        - None
+        """
+        if not self._started:
+            self.start()
+        raw_join = self._raw.join
+        try:
+            raw_join(download)
+        except TypeError:
+            # Older native builds without the download argument.
+            if download is False:
+                raise GpuInvalidArgument(
+                    "GpuJob.join(download=False) requires a rebuild with "
+                    "CTHREADS_GPU residency support"
+                ) from None
+            raw_join()
 
     def result(self) -> None:
         """
@@ -76,6 +102,42 @@ def prepare(force: bool = False) -> dict[str, Any]:
     return compile(force=force)
 
 
+def _resident_meta_for_args(
+    meta: dict[str, Any], ordered: list[Any]
+) -> dict[int, str]:
+    """
+    Map value_index -> GpuState name for arena-bound list args.
+
+    Raises if a bound list length no longer matches the registered numel.
+    """
+    params = meta.get("params")
+    if not isinstance(params, list):
+        return {}
+    resident: dict[int, str] = {}
+    for i, param in enumerate(params):
+        if not isinstance(param, dict) or param.get("kind") != "list":
+            continue
+        slot = lookup_resident(ordered[i])
+        if slot is None:
+            continue
+        host = ordered[i]
+        if not isinstance(host, list):
+            continue
+        if len(host) != slot.numel:
+            raise GpuInvalidArgument(
+                f"gpu(): bound list {slot.name!r} length changed "
+                f"(was {slot.numel}, now {len(host)}); call arena.bind again"
+            )
+        meta_kind = param.get("elem_kind")
+        if meta_kind is not None and meta_kind != slot.elem_kind:
+            raise GpuInvalidArgument(
+                f"gpu(): bound list {slot.name!r} elem_kind {slot.elem_kind!r} "
+                f"does not match kernel {meta_kind!r}"
+            )
+        resident[i] = slot.state_name
+    return resident
+
+
 def gpu(
     fn: Callable[..., Any],
     *args: Any,
@@ -86,7 +148,8 @@ def gpu(
     Launch a `@Gpu` kernel and return a joinable job handle.
 
     Ensures GPU compile/emit has run, then submits via `launch_gpu_kernel`.
-    List arguments are written back in place on `join()`.
+    List arguments are written back in place on `join()` unless
+    `join(download=False)` is used with GpuArena-resident lists.
 
     #### Args:
     - fn: Callable = `@Gpu`-decorated kernel
@@ -149,6 +212,10 @@ def gpu(
         meta["group_count_y"] = 1
     if meta.get("group_count_z") is None:
         meta["group_count_z"] = 1
+
+    resident = _resident_meta_for_args(meta, ordered)
+    if resident:
+        meta["resident"] = resident
 
     try:
         raw = _ext_gpu_api.launch_gpu_kernel(meta, ordered)

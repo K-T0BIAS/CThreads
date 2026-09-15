@@ -82,6 +82,12 @@ struct SpawnedGpuKernel {
     // Ref list slots only; value scalars are not written back.
     std::vector<WritebackListSlot> writeback_lists;
 
+    // Parallel to pack.container_slots: true => destroy_buffer on release.
+    // False => borrowed from GpuState; handles cleared without destroy.
+    std::vector<uint8_t> container_owned;
+    // GpuState names marked in_use for this launch; released in release_inflight.
+    std::vector<std::string> resident_names;
+
     bool finished = false;
     std::mutex done_mu;
     std::condition_variable done_cv;
@@ -102,13 +108,15 @@ struct SpawnedGpuKernel {
     void start();
 
     /**
-     * Wait until the GPU fence signals, then download/writeback and release
-     * inflight GPU objects. Rethrows eptr if set. Idempotent after finished.
+     * Wait until the GPU fence signals, optionally download/writeback, then
+     * release inflight GPU objects. Rethrows eptr if set. Idempotent after finished.
      *
      * #### Parameters:
      * - context: Context& = same device that created pack / submitted work.
+     * - download: bool = if true (default), download ref lists into values_keep.
+     *   If false, skip writeback (resident buffers stay device-authoritative).
      */
-    void join(Context& context);
+    void join(Context& context, bool download = true);
 
     /**
      * Block until done_flag is set (join or failure path). Does not download.

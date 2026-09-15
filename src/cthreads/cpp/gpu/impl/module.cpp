@@ -4,6 +4,8 @@
 #include "../headers/shader_cache.hpp"
 #include "../headers/pack.hpp"
 #include "../headers/descriptors.hpp"
+#include "../headers/state.hpp"
+#include "../headers/memory.hpp"
 
 #include <cstring>
 #include <cstddef>
@@ -56,9 +58,27 @@ void release_inflight(Context& context, SpawnedGpuKernel& job) {
         pack::free_set(context, job.descriptor_pool, job.descriptor_set);
     }
     pack::destroy_pool(context, job.descriptor_pool);
-    // destroy the pack
+
+    // Borrowed GpuState buffers: drop handles without destroy_buffer.
+    for (size_t i = 0; i < job.pack.container_slots.size(); ++i) {
+        const bool owned =
+            (i < job.container_owned.size()) ? (job.container_owned[i] != 0) : true;
+        if (!owned) {
+            job.pack.container_slots[i].buffer = memory::GpuBuffer{};
+        }
+    }
+    for (const std::string& name : job.resident_names) {
+        try {
+            memory::GpuState::getInstance().release_in_use(name);
+        } catch (...) {
+            // Best-effort on teardown / double-release paths.
+        }
+    }
+    job.resident_names.clear();
+    job.container_owned.clear();
+
     pack::destroy_gpu_pack(context, job.pack);
-    job.symbol.clear(); // clear the symbol
+    job.symbol.clear();
     job.writeback_lists.clear();
     job.values_keep.reset();
 }
@@ -293,7 +313,7 @@ bool SpawnedGpuKernel::done() {
     return done_flag;
 }
 
-void SpawnedGpuKernel::join(Context& context) {
+void SpawnedGpuKernel::join(Context& context, bool download) {
     if (finished) {
         if (eptr) {
             std::rethrow_exception(eptr);
@@ -320,7 +340,8 @@ void SpawnedGpuKernel::join(Context& context) {
         }
 
         // Permanent list writeback path (Threadable/schema marshal is later).
-        if (!writeback_lists.empty()) {
+        // download=false: fence only; resident GpuState buffers stay authoritative.
+        if (download && !writeback_lists.empty()) {
             compute_to_transfer_barrier(context);
             writeback_ref_lists(context, *this);
         }
@@ -512,6 +533,21 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
         }
     }
 
+    // Optional residency: value_index -> GpuState name (Python GpuArena).
+    // Those list SSBOs are borrowed; skip create/upload for them.
+    std::unordered_map<size_t, std::string> resident_by_value_index;
+    if (meta.contains("resident") && !meta["resident"].is_none()) {
+        py::dict res = meta["resident"].cast<py::dict>();
+        for (auto item : res) {
+            const size_t value_index =
+                py::reinterpret_borrow<py::object>(item.first).cast<size_t>();
+            const std::string state_name =
+                py::reinterpret_borrow<py::object>(item.second)
+                    .cast<std::string>();
+            resident_by_value_index.emplace(value_index, state_name);
+        }
+    }
+
     // Job owns GPU objects from here on so failures can release_inflight.
     auto job = std::make_shared<SpawnedGpuKernel>();
     job->symbol = symbol;
@@ -541,12 +577,53 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
     }
 
     try {
-        // init the gpu pack (device-local scalar blob + one buffer per list)
-        job->pack = pack::create_gpu_pack(
-            context,
-            scalar_bytes,
-            container_specs
-        );
+        // Build pack: owned scalars + per-list either create or borrow from GpuState.
+        job->container_owned.assign(container_plans.size(), 1);
+        if (scalar_bytes > 0) {
+            job->pack.scalar_buffer = memory::create_buffer(
+                context,
+                static_cast<VkDeviceSize>(scalar_bytes),
+                memory::BufferKind::DeviceLocal
+            );
+        }
+        job->pack.container_slots.resize(container_plans.size());
+        memory::GpuState& state = memory::GpuState::getInstance();
+
+        for (size_t c = 0; c < container_plans.size(); ++c) {
+            const ContainerSlotPlan& plan = container_plans[c];
+            job->pack.container_slots[c].spec =
+                pack::ContainerSpec{plan.elem_bytes, plan.numel};
+            if (plan.numel == 0) {
+                continue;
+            }
+
+            auto res_it = resident_by_value_index.find(plan.value_index);
+            if (res_it != resident_by_value_index.end()) {
+                const std::string& state_name = res_it->second;
+                // Checkout before reading handles so remove cannot race.
+                state.mark_in_use(state_name);
+                job->resident_names.push_back(state_name);
+                memory::GpuBuffer& registered = state.get(state_name);
+                const VkDeviceSize need =
+                    static_cast<VkDeviceSize>(plan.elem_bytes * plan.numel);
+                if (registered.size < need) {
+                    throw std::runtime_error(
+                        "cthreads.gpu.GpuInvalidArgument: resident buffer '" +
+                        state_name + "' is too small for list arg");
+                }
+                // Borrow handles; GpuState remains the owner.
+                job->pack.container_slots[c].buffer = registered;
+                job->container_owned[c] = 0;
+                continue;
+            }
+
+            job->pack.container_slots[c].buffer = memory::create_buffer(
+                context,
+                static_cast<VkDeviceSize>(plan.elem_bytes * plan.numel),
+                memory::BufferKind::DeviceLocal
+            );
+            job->container_owned[c] = 1;
+        }
 
         // Pack Python scalars into a host byte blob, then upload through staging.
         if (scalar_bytes > 0) {
@@ -563,13 +640,13 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 context, job->pack, scalar_host.data(), scalar_bytes);
         }
 
-        // Upload each list container from ordered_values (pack slot order).
+        // Upload each non-resident list container from ordered_values.
         for (size_t c = 0; c < container_plans.size(); ++c) {
             const ContainerSlotPlan& plan = container_plans[c];
-            if (plan.numel == 0) {
-                continue; // empty slot: no VkBuffer; update_descriptors still rejects empty for now
+            if (plan.numel == 0 || job->container_owned[c] == 0) {
+                continue; // empty or resident (already on device)
             }
-            py::list list_val = ordered_values[plan.value_index].cast<py::list>(); // get the py side list that was passed in the kernel call
+            py::list list_val = ordered_values[plan.value_index].cast<py::list>();
             if (plan.elem_kind == "float") {
                 std::vector<float> host(plan.numel);
                 for (size_t j = 0; j < plan.numel; ++j) {
