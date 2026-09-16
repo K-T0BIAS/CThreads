@@ -11,10 +11,12 @@ name = "cthreads"
 version = "0.1.1"
 description = "Compile @Threadable / @Thread Python into native C++ kernels and run them off the GIL."
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
 keywords = ["threading", "multithreading", "codegen", "python compiler", "cpp", "pybind11"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -53,6 +55,7 @@ wheel.exclude = [
     "**/*.pyc",
 ]
 sdist.include = [
+    "LICENSE",
     "src/cthreads/cpp/**",
     "src/cthreads/python/cthreads/**",
     "src/cthreads/python/api/**",

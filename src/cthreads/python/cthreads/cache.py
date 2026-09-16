@@ -40,6 +40,7 @@ _GITIGNORE_END = "# <<< cthreads (auto)"
 _GITIGNORE_PATTERNS = (
     "__Thread__/",
     "__Threadable__/",
+    "__Gpu__/",
     ".cthreads_cache.json",
     "cthreads_kernels.dll",
     "cthreads_kernels.so",
@@ -66,18 +67,30 @@ def cache_path_for_root(root: Path) -> Path:
     return root / CACHE_FILENAME
 
 
+def _empty_cache(version: str) -> dict[str, Any]:
+    """Fresh cache document: CPU units + GPU units share one file, separate maps."""
+    return {
+        "version": version,
+        "units": {},
+        "gpu_units": {},
+        "link_hash": None,
+        "binary": None,
+    }
+
+
 def load_cache(root: Path) -> dict[str, Any]:
     path = cache_path_for_root(root)
     version = REGISTRY.VERSION
     if not path.is_file():
-        return {"version": version, "units": {}, "link_hash": None, "binary": None}
+        return _empty_cache(version)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": version, "units": {}, "link_hash": None, "binary": None}
+        return _empty_cache(version)
     if data.get("version") != version:
-        return {"version": version, "units": {}, "link_hash": None, "binary": None}
+        return _empty_cache(version)
     data.setdefault("units", {})
+    data.setdefault("gpu_units", {})
     return data
 
 

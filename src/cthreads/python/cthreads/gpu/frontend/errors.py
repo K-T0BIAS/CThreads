@@ -1,6 +1,5 @@
 """ctypes-style error types for cthreads.gpu (mapped from C++ message prefixes)."""
 
-
 class CThreadsGPUError(Exception):
     def __init__(self, detail: str = "Unknown Error") -> None:
         self.detail = detail
@@ -65,3 +64,22 @@ class GPUNotAvailable(CThreadsGPUError):
 
     def __init__(self, detail: str = "GPU not available") -> None:
         super().__init__(detail)
+
+
+def _map_error(exc: BaseException) -> CThreadsGPUError:
+    msg = str(exc)
+    if "VulkanLoaderNotFound" in msg:
+        return VulkanLoaderNotFound(msg)
+    if "VulkanNoDevice" in msg:
+        return VulkanNoDevice(msg)
+    if "VulkanOutOfMemory" in msg:
+        return VulkanOutOfMemory(msg)
+    if "GpuUseAfterDestroy" in msg:
+        return GpuUseAfterDestroy(msg)
+    if "GpuInvalidArgument" in msg:
+        return GpuInvalidArgument(msg)
+    if "VulkanNotBuilt" in msg:
+        return VulkanNotBuiltError(msg)
+    if "VulkanInitFailed" in msg:
+        return VulkanInitFailed(msg)
+    return VulkanInitFailed(msg)

@@ -4,6 +4,8 @@
 #include "../headers/shader_cache.hpp"
 #include "../headers/pack.hpp"
 #include "../headers/descriptors.hpp"
+#include "../headers/state.hpp"
+#include "../headers/memory.hpp"
 
 #include <cstring>
 #include <cstddef>
@@ -39,37 +41,44 @@ size_t std430_align_of(const std::string& kind) {
 }
 
 void release_inflight(Context& context, SpawnedGpuKernel& job) {
-    // Destroying the pool frees any CBs allocated from it; free first when we can.
-    if (job.command_buffer != VK_NULL_HANDLE &&
-        job.command_pool != VK_NULL_HANDLE &&
-        context.device != VK_NULL_HANDLE &&
-        context.vkFreeCommandBuffers) { // free the cmd buffer when all relevant ressources are valid
-        context.vkFreeCommandBuffers(
-            context.device, job.command_pool, 1, &job.command_buffer);
+    // Return checked-out CB + fence to LaunchEngine (do not destroy the pool).
+    if (job.command_buffer != VK_NULL_HANDLE || job.fence != VK_NULL_HANDLE) {
+        LaunchResources resources{};
+        resources.command_buffer = job.command_buffer;
+        resources.fence = job.fence;
+        job.command_buffer = VK_NULL_HANDLE;
+        job.fence = VK_NULL_HANDLE;
+        job.command_pool = VK_NULL_HANDLE;
+        return_launch_resources(context, resources);
+    } else {
+        job.command_pool = VK_NULL_HANDLE;
     }
-    job.command_buffer = VK_NULL_HANDLE;
-
-    // Per-launch command pool (not the TransferEngine pool).
-    if (job.command_pool != VK_NULL_HANDLE &&
-        context.device != VK_NULL_HANDLE &&
-        context.vkDestroyCommandPool) {
-        context.vkDestroyCommandPool(context.device, job.command_pool, nullptr);
-    }
-    job.command_pool = VK_NULL_HANDLE;
 
     if (job.descriptor_set != VK_NULL_HANDLE) { // free the descriptors (if not freed yet)
         pack::free_set(context, job.descriptor_pool, job.descriptor_set);
     }
     pack::destroy_pool(context, job.descriptor_pool);
-    // destroy the fence if not already done
-    if (job.fence != VK_NULL_HANDLE && context.device != VK_NULL_HANDLE &&
-        context.vkDestroyFence) {
-        context.vkDestroyFence(context.device, job.fence, nullptr);
+
+    // Borrowed GpuState buffers: drop handles without destroy_buffer.
+    for (size_t i = 0; i < job.pack.container_slots.size(); ++i) {
+        const bool owned =
+            (i < job.container_owned.size()) ? (job.container_owned[i] != 0) : true;
+        if (!owned) {
+            job.pack.container_slots[i].buffer = memory::GpuBuffer{};
+        }
     }
-    job.fence = VK_NULL_HANDLE;
-    // destroy the pack
+    for (const std::string& name : job.resident_names) {
+        try {
+            memory::GpuState::getInstance().release_in_use(name);
+        } catch (...) {
+            // Best-effort on teardown / double-release paths.
+        }
+    }
+    job.resident_names.clear();
+    job.container_owned.clear();
+
     pack::destroy_gpu_pack(context, job.pack);
-    job.symbol.clear(); // clear the symbol
+    job.symbol.clear();
     job.writeback_lists.clear();
     job.values_keep.reset();
 }
@@ -230,6 +239,18 @@ void writeback_ref_lists(Context& context, SpawnedGpuKernel& job) {
             for (size_t j = 0; j < slot.numel; ++j) {
                 list_val[j] = host[j];
             }
+        } else if (slot.elem_kind == "bool") {
+            // GLSL bool is std430 32-bit 0/1 (same packing as scalar bool).
+            std::vector<std::int32_t> host(slot.numel);
+            pack::download_container(
+                context,
+                job.pack,
+                slot.container_index,
+                host.data(),
+                host.size() * sizeof(std::int32_t));
+            for (size_t j = 0; j < slot.numel; ++j) {
+                list_val[j] = host[j] != 0;
+            }
         } else if (slot.elem_kind == "double") {
             std::vector<double> host(slot.numel);
             pack::download_container(
@@ -292,7 +313,7 @@ bool SpawnedGpuKernel::done() {
     return done_flag;
 }
 
-void SpawnedGpuKernel::join(Context& context) {
+void SpawnedGpuKernel::join(Context& context, bool download) {
     if (finished) {
         if (eptr) {
             std::rethrow_exception(eptr);
@@ -319,7 +340,8 @@ void SpawnedGpuKernel::join(Context& context) {
         }
 
         // Permanent list writeback path (Threadable/schema marshal is later).
-        if (!writeback_lists.empty()) {
+        // download=false: fence only; resident GpuState buffers stay authoritative.
+        if (download && !writeback_lists.empty()) {
             compute_to_transfer_barrier(context);
             writeback_ref_lists(context, *this);
         }
@@ -511,6 +533,21 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
         }
     }
 
+    // Optional residency: value_index -> GpuState name (Python GpuArena).
+    // Those list SSBOs are borrowed; skip create/upload for them.
+    std::unordered_map<size_t, std::string> resident_by_value_index;
+    if (meta.contains("resident") && !meta["resident"].is_none()) {
+        py::dict res = meta["resident"].cast<py::dict>();
+        for (auto item : res) {
+            const size_t value_index =
+                py::reinterpret_borrow<py::object>(item.first).cast<size_t>();
+            const std::string state_name =
+                py::reinterpret_borrow<py::object>(item.second)
+                    .cast<std::string>();
+            resident_by_value_index.emplace(value_index, state_name);
+        }
+    }
+
     // Job owns GPU objects from here on so failures can release_inflight.
     auto job = std::make_shared<SpawnedGpuKernel>();
     job->symbol = symbol;
@@ -540,12 +577,53 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
     }
 
     try {
-        // init the gpu pack (device-local scalar blob + one buffer per list)
-        job->pack = pack::create_gpu_pack(
-            context,
-            scalar_bytes,
-            container_specs
-        );
+        // Build pack: owned scalars + per-list either create or borrow from GpuState.
+        job->container_owned.assign(container_plans.size(), 1);
+        if (scalar_bytes > 0) {
+            job->pack.scalar_buffer = memory::create_buffer(
+                context,
+                static_cast<VkDeviceSize>(scalar_bytes),
+                memory::BufferKind::DeviceLocal
+            );
+        }
+        job->pack.container_slots.resize(container_plans.size());
+        memory::GpuState& state = memory::GpuState::getInstance();
+
+        for (size_t c = 0; c < container_plans.size(); ++c) {
+            const ContainerSlotPlan& plan = container_plans[c];
+            job->pack.container_slots[c].spec =
+                pack::ContainerSpec{plan.elem_bytes, plan.numel};
+            if (plan.numel == 0) {
+                continue;
+            }
+
+            auto res_it = resident_by_value_index.find(plan.value_index);
+            if (res_it != resident_by_value_index.end()) {
+                const std::string& state_name = res_it->second;
+                // Checkout before reading handles so remove cannot race.
+                state.mark_in_use(state_name);
+                job->resident_names.push_back(state_name);
+                memory::GpuBuffer& registered = state.get(state_name);
+                const VkDeviceSize need =
+                    static_cast<VkDeviceSize>(plan.elem_bytes * plan.numel);
+                if (registered.size < need) {
+                    throw std::runtime_error(
+                        "cthreads.gpu.GpuInvalidArgument: resident buffer '" +
+                        state_name + "' is too small for list arg");
+                }
+                // Borrow handles; GpuState remains the owner.
+                job->pack.container_slots[c].buffer = registered;
+                job->container_owned[c] = 0;
+                continue;
+            }
+
+            job->pack.container_slots[c].buffer = memory::create_buffer(
+                context,
+                static_cast<VkDeviceSize>(plan.elem_bytes * plan.numel),
+                memory::BufferKind::DeviceLocal
+            );
+            job->container_owned[c] = 1;
+        }
 
         // Pack Python scalars into a host byte blob, then upload through staging.
         if (scalar_bytes > 0) {
@@ -562,13 +640,13 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 context, job->pack, scalar_host.data(), scalar_bytes);
         }
 
-        // Upload each list container (binding 1..N) from ordered_values.
+        // Upload each non-resident list container from ordered_values.
         for (size_t c = 0; c < container_plans.size(); ++c) {
             const ContainerSlotPlan& plan = container_plans[c];
-            if (plan.numel == 0) {
-                continue; // empty slot: no VkBuffer; update_descriptors still rejects empty for now
+            if (plan.numel == 0 || job->container_owned[c] == 0) {
+                continue; // empty or resident (already on device)
             }
-            py::list list_val = ordered_values[plan.value_index].cast<py::list>(); // get the py side list that was passed in the kernel call
+            py::list list_val = ordered_values[plan.value_index].cast<py::list>();
             if (plan.elem_kind == "float") {
                 std::vector<float> host(plan.numel);
                 for (size_t j = 0; j < plan.numel; ++j) {
@@ -584,6 +662,18 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 std::vector<std::int32_t> host(plan.numel);
                 for (size_t j = 0; j < plan.numel; ++j) {
                     host[j] = list_val[j].cast<std::int32_t>();
+                }
+                pack::upload_container(
+                    context,
+                    job->pack,
+                    c,
+                    host.data(),
+                    host.size() * sizeof(std::int32_t));
+            } else if (plan.elem_kind == "bool") {
+                // std430 bool = 4 bytes; coerce Python bool to 0/1 int32.
+                std::vector<std::int32_t> host(plan.numel);
+                for (size_t j = 0; j < plan.numel; ++j) {
+                    host[j] = list_val[j].cast<bool>() ? 1 : 0;
                 }
                 pack::upload_container(
                     context,
@@ -613,13 +703,15 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
         const shader::ShaderCacheEntry& entry =
             shader::ShaderCache::getInstance().get(symbol);
 
-        // binding_count on the entry must match 1 + number of list slots
+        // binding_count = (scalars ? 1 : 0) + list count (matches Python Signature)
         const uint32_t expected_bindings =
-            1u + static_cast<uint32_t>(container_specs.size());
+            (scalar_bytes > 0 ? 1u : 0u) +
+            static_cast<uint32_t>(container_specs.size());
         if (entry.binding_count != expected_bindings) {
             throw std::runtime_error(
                 "cthreads.gpu.GpuInvalidArgument: ShaderCacheEntry binding_count (" +
-                std::to_string(entry.binding_count) + ") != 1 + list count (" +
+                std::to_string(entry.binding_count) +
+                ") != (scalars?1:0) + list count (" +
                 std::to_string(expected_bindings) + ")");
         }
         if (entry.pipeline == VK_NULL_HANDLE ||
@@ -640,44 +732,20 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
         pack::update_descriptors(
             context, job->descriptor_set, entry, job->pack);
 
-        // Need bind/dispatch/barrier + the usual CB/submit PFNs.
-        if (!context.vkCreateCommandPool || !context.vkDestroyCommandPool ||
-            !context.vkAllocateCommandBuffers || !context.vkFreeCommandBuffers ||
-            !context.vkBeginCommandBuffer || !context.vkEndCommandBuffer ||
+        // Need bind/dispatch/barrier PFNs (CB/fence come from LaunchEngine).
+        if (!context.vkBeginCommandBuffer || !context.vkEndCommandBuffer ||
             !context.vkCmdPipelineBarrier || !context.vkCmdBindPipeline ||
-            !context.vkCmdBindDescriptorSets || !context.vkCmdDispatch ||
-            !context.vkCreateFence || !context.vkDestroyFence ||
-            !context.vkQueueSubmit || !context.queue) {
+            !context.vkCmdBindDescriptorSets || !context.vkCmdDispatch) {
             throw std::runtime_error(
                 "cthreads.gpu.VulkanInitFailed: launch_gpu_kernel missing "
-                "dispatch/command/fence entry points or queue");
+                "dispatch/command entry points");
         }
 
-        // Per-job command pool: own lifetime, no TransferEngine mutex needed.
-        VkCommandPoolCreateInfo pool_info{};
-        pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        pool_info.queueFamilyIndex = context.queue_family;
-        pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-        if (context.vkCreateCommandPool(
-                context.device, &pool_info, nullptr, &job->command_pool) !=
-            VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkCreateCommandPool failed in "
-                "launch_gpu_kernel");
-        }
-
-        VkCommandBufferAllocateInfo alloc_info{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc_info.commandPool = job->command_pool;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc_info.commandBufferCount = 1;
-        if (context.vkAllocateCommandBuffers(
-                context.device, &alloc_info, &job->command_buffer) !=
-            VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkAllocateCommandBuffers failed "
-                "in launch_gpu_kernel");
-        }
+        // Checkout CB + fence from Context LaunchEngine (pool is process-lifetime).
+        LaunchResources launch = checkout_launch_resources(context);
+        job->command_buffer = launch.command_buffer;
+        job->fence = launch.fence;
+        job->command_pool = context.launch_engine.command_pool;
 
         VkCommandBufferBeginInfo begin_info{};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -734,27 +802,8 @@ std::shared_ptr<SpawnedGpuKernel> launch_gpu_kernel(
                 "launch_gpu_kernel");
         }
 
-        // Per-job fence (not TransferEngine.fence). Unsignaled until submit done.
-        VkFenceCreateInfo fence_info{};
-        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        if (context.vkCreateFence(
-                context.device, &fence_info, nullptr, &job->fence) !=
-            VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkCreateFence failed in "
-                "launch_gpu_kernel");
-        }
-
-        VkSubmitInfo submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &job->command_buffer;
-        if (context.vkQueueSubmit(
-                context.queue, 1, &submit, job->fence) != VK_SUCCESS) {
-            throw std::runtime_error(
-                "cthreads.gpu.VulkanInitFailed: vkQueueSubmit failed in "
-                "launch_gpu_kernel");
-        }
+        // Fence was checked out unsignaled; submit under launch_engine_mutex.
+        submit_launch(context, job->command_buffer, job->fence);
         // Do not wait here — join() waits on job->fence.
     } catch (...) {
         // Tear down any handles already stashed; then rethrow to Python.

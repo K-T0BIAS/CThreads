@@ -23,7 +23,7 @@ The `Context` struct holds all of that state for the whole process. There is one
 
 ### `void init()`
 
-Opens the loader, creates instance and device, resolves entry points, marks `ready = true`, and creates the TransferEngine (command pool and fence). Throws typed-style error strings (for example `cthreads.gpu.VulkanLoaderNotFound`) that Python maps into exceptions in `cthreads.gpu`.
+Opens the loader, creates instance and device, resolves entry points, marks `ready = true`, and creates the TransferEngine and LaunchEngine. Throws typed-style error strings (for example `cthreads.gpu.VulkanLoaderNotFound`) that Python maps into exceptions in `cthreads.gpu`.
 
 Call this when you need the GPU. Python `cthreads.gpu.init()` ends up here.
 
@@ -31,7 +31,8 @@ Call this when you need the GPU. Python `cthreads.gpu.init()` ends up here.
 
 Destroys children first, then parents:
 
-1. TransferEngine (staging buffer, fence, command pool)
+1. LaunchEngine (free fences, then command pool)
+2. TransferEngine (staging buffer, fence, command pool)
 2. Shader cache entries (pipelines and layouts)
 3. Logical device
 4. Instance
@@ -99,6 +100,10 @@ Used by [module / launch](./module.md): `vkCmdBindPipeline`, `vkCmdBindDescripto
 
 See the next section. `transfer_engine_mutex` serializes use of the single shared engine.
 
+### LaunchEngine and mutex
+
+`LaunchEngine` owns the process-lifetime command pool used by `launch_gpu_kernel`. Jobs checkout a command buffer + fence, submit under `launch_engine_mutex`, wait their own fence on join, then return the CB/fence to free lists. Overlapping jobs are supported; one shared fence is not.
+
 ## Technical terms
 
 - Vulkan loader: system library that discovers Installable Client Drivers (ICDs), which are the vendor GPU drivers.
@@ -144,6 +149,7 @@ A future pool of engines is discussed for CPU threads launching GPU work. See [g
 6. `vkCreateDevice` opens the logical device; `vkGetDeviceQueue` gets the queue.
 7. Resolve device-level functions (buffers, commands, shaders, descriptors).
 8. Create TransferEngine pool and fence.
+9. Create LaunchEngine command pool (CB/fence free lists grow on demand).
 9. Set `ready = true`.
 
 ## Key Vulkan calls during shutdown (story order)

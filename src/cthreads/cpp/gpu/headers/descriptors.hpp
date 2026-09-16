@@ -123,12 +123,12 @@ void free_set(
 );
 
 /**
- * Writes binding-convention buffer bindings from a GpuPack into a descriptor set.
+ * Writes buffer bindings from a GpuPack into a descriptor set.
  *
- * Binding 0 -> pack.scalar_buffer. Bindings 1..N -> pack.container_slots[0..N-1].
- * binding_count must equal 1 + pack.container_slots.size() and match the set
- * layout. Every binding must have a non-null VkBuffer (empty list slots are
- * not supported here yet; use a non-empty buffer or a future dummy SSBO).
+ * If pack has a scalar buffer: binding 0 = scalars, 1..N = lists.
+ * If not: binding 0..N-1 = lists (no scalar descriptor).
+ * binding_count must equal (has_scalars ? 1 : 0) + container_slots.size().
+ * Every written binding must have a non-null VkBuffer.
  *
  * Called by the launch path after allocate_set and before recording bind/dispatch.
  *
@@ -136,7 +136,7 @@ void free_set(
  * - context: Context& = initialized GPU context with vkUpdateDescriptorSets.
  * - set: VkDescriptorSet = destination set from allocate_set.
  * - binding_count: uint32_t = number of STORAGE_BUFFER bindings to write.
- * - pack: const GpuPack& = source buffers in binding order (scalars then lists).
+ * - pack: const GpuPack& = source buffers (optional scalars, then lists).
  *
  * #### Throws:
  * - runtime_error if set is null, binding_count mismatches the pack, any

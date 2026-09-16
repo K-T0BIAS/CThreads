@@ -52,6 +52,7 @@ api/
 # >>> cthreads (auto)
 __Thread__/
 __Threadable__/
+__Gpu__/
 .cthreads_cache.json
 cthreads_kernels.dll
 cthreads_kernels.so

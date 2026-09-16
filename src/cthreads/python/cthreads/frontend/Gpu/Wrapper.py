@@ -1,3 +1,3 @@
+from ...gpu.frontend.wrapper import Gpu
 
-
-def Gpu(fn, device=None): pass
+__all__ = ["Gpu"]

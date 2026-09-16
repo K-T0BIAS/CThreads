@@ -77,7 +77,9 @@ def example_fn() -> None:
 
 1. the use of special utf characters is not permitted
 ```latex
-Exmaple:
+Example:
 — should be - or depending on ctx ,. etc.
 → should be ->
 ```
+
+2. `from __future__ import annotations` is only permitted iff its used to avoid import errors, improve import performance, with typechecking, or to avoid any other error. Otherwise explicit imports are preffered to ensure easy dependency maintenace

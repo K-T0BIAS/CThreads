@@ -1,9 +1,8 @@
 """
-GPU shader / launch smoke (test-only _ext.gpu.testing).
+GPU shader / launch tests.
 
-Covers create_entry, ShaderCache, update_descriptors, and launch_gpu_kernel
-via smoke_launch_saxpy (join writeback). Live checks skip when CTHREADS_GPU
-is off or no Vulkan device is available.
+Substrate smokes stay on `_ext.gpu.testing`. Launch + join use the product
+path: `_ext.gpu.launch_gpu_kernel` / `GpuJob` (via `_ext_gpu_api`).
 """
 
 from __future__ import annotations
@@ -11,11 +10,13 @@ from __future__ import annotations
 import pytest
 
 from cthreads import gpu
-from cthreads.gpu.errors import GpuInvalidArgument
+from cthreads.gpu import _ext_gpu_api
+from cthreads.gpu.frontend.errors import GpuInvalidArgument
+from cthreads.gpu.gpu_kernel_meta import build_gpu_kernel_meta
 
 
 def _ext_gpu():
-    return gpu._gpu
+    return gpu._ext_gpu_api._gpu
 
 
 def _require_gpu_testing():
@@ -37,7 +38,16 @@ def test_public_gpu_has_no_shader_smoke_exports():
     assert not hasattr(gpu, "smoke_create_entry")
     assert not hasattr(gpu, "smoke_update_descriptors")
     assert not hasattr(gpu, "smoke_launch_saxpy")
+    assert not hasattr(gpu, "register_smoke_saxpy")
     assert not hasattr(gpu, "testing")
+
+
+def test_ext_gpu_exports_launch_api():
+    ext = _ext_gpu()
+    if ext is None:
+        pytest.skip("cthreads built without CTHREADS_GPU (_ext.gpu missing)")
+    assert hasattr(ext, "launch_gpu_kernel")
+    assert hasattr(ext, "GpuJob")
 
 
 def test_live_smoke_create_entry():
@@ -64,13 +74,42 @@ def test_live_smoke_cache_register_and_get():
         gpu.shutdown()
 
 
-def test_live_smoke_launch_saxpy():
+def test_live_launch_saxpy_product_path():
+    """
+    Register smoke SPIR-V (test-only), then launch/join via product bindings.
+    """
     testing = _require_gpu_testing()
-    if not hasattr(testing, "smoke_launch_saxpy"):
-        pytest.skip("rebuild with latest gpu testing (smoke_launch_saxpy)")
+    if not hasattr(testing, "register_smoke_saxpy"):
+        pytest.skip("rebuild with register_smoke_saxpy")
+    if not hasattr(_ext_gpu(), "launch_gpu_kernel"):
+        pytest.skip("rebuild with product launch_gpu_kernel")
+
+    def saxpy(n: int, a: float, x: list[float], y: list[float]) -> None:
+        pass
+
     try:
-        testing.smoke_launch_saxpy()
+        symbol = testing.register_smoke_saxpy()
+        meta = build_gpu_kernel_meta(saxpy, symbol=symbol).to_dict()
+        meta["group_count_x"] = 1
+        meta["group_count_y"] = 1
+        meta["group_count_z"] = 1
+
+        n = 4
+        a = 2.0
+        x = [1.0, 2.0, 3.0, 4.0]
+        y = [10.0, 20.0, 30.0, 40.0]
+        expect = [a * xi + yi for xi, yi in zip(x, y)]
+
+        job = _ext_gpu_api.launch_gpu_kernel(meta, [n, a, x, y])
+        job.join()
+        assert y == expect
+        assert job.done()
     finally:
+        if hasattr(testing, "clear_shader_cache"):
+            try:
+                testing.clear_shader_cache()
+            except Exception:
+                pass
         gpu.shutdown()
 
 

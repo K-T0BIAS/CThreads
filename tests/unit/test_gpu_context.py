@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from cthreads import gpu
-from cthreads.gpu.errors import (
+from cthreads.gpu.frontend.errors import (
     CThreadsGPUError,
     GPUNotAvailable,
     GpuInvalidArgument,
@@ -82,24 +82,24 @@ def test_gpu_module_exports():
 
 
 def test_not_built_available_false(monkeypatch):
-    monkeypatch.setattr(gpu, "_gpu", None)
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", None)
     assert gpu.available() is False
 
 
 def test_not_built_device_name_raises(monkeypatch):
-    monkeypatch.setattr(gpu, "_gpu", None)
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", None)
     with pytest.raises(VulkanNotBuiltError, match="CTHREADS_GPU"):
         gpu.device_name()
 
 
 def test_not_built_init_raises(monkeypatch):
-    monkeypatch.setattr(gpu, "_gpu", None)
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", None)
     with pytest.raises(VulkanNotBuiltError, match="CTHREADS_GPU"):
         gpu.init()
 
 
 def test_not_built_shutdown_noop(monkeypatch):
-    monkeypatch.setattr(gpu, "_gpu", None)
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", None)
     gpu.shutdown()  # must not raise
 
 
@@ -148,7 +148,7 @@ class _FakeGpu:
     ],
 )
 def test_map_error_via_device_name(monkeypatch, msg, exc_type):
-    monkeypatch.setattr(gpu, "_gpu", _FakeGpu(RuntimeError(msg)))
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", _FakeGpu(RuntimeError(msg)))
     with pytest.raises(exc_type) as ei:
         gpu.device_name()
     assert msg in str(ei.value)
@@ -156,7 +156,7 @@ def test_map_error_via_device_name(monkeypatch, msg, exc_type):
 
 def test_map_error_via_init(monkeypatch):
     monkeypatch.setattr(
-        gpu,
+        gpu._ext_gpu_api,
         "_gpu",
         _FakeGpu(RuntimeError("cthreads.gpu.VulkanLoaderNotFound: missing")),
     )
@@ -166,17 +166,17 @@ def test_map_error_via_init(monkeypatch):
 
 def test_fake_available_false_without_raising(monkeypatch):
     """Mirrors C++ available(): False when init would fail, no exception."""
-    monkeypatch.setattr(gpu, "_gpu", _FakeGpu(ready=False))
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", _FakeGpu(ready=False))
     assert gpu.available() is False
 
 
 def test_fake_ready_device_name(monkeypatch):
-    monkeypatch.setattr(gpu, "_gpu", _FakeGpu(ready=True))
+    monkeypatch.setattr(gpu._ext_gpu_api, "_gpu", _FakeGpu(ready=True))
     assert gpu.available() is True
     assert gpu.device_name() == "FakeGPU"
     gpu.init()
     gpu.shutdown()
-    assert gpu._gpu.shutdown_calls == 1
+    assert gpu._ext_gpu_api._gpu.shutdown_calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ def test_fake_ready_device_name(monkeypatch):
 
 
 def _ext_gpu_built() -> bool:
-    return gpu._gpu is not None
+    return gpu._ext_gpu_api._gpu is not None
 
 
 def _require_gpu():

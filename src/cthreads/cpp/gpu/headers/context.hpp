@@ -1,8 +1,9 @@
 #pragma once
 #include <vulkan/vulkan.h>
-#include <string>
 #include <cstdint>
 #include <mutex>
+#include <string>
+#include <vector>
 
 #include "memory.hpp"
 
@@ -21,6 +22,30 @@ struct TransferEngine {
     VkFence fence = VK_NULL_HANDLE;
     // Host-visible scratch for H2D/D2H; empty until allocated. Grow-on-demand.
     memory::GpuBuffer staging;
+};
+
+/**
+ * Process-lifetime launch command pool with per-job CB + fence checkout.
+ *
+ * Overlapping jobs each hold one command_buffer and one fence until join.
+ * The pool itself is never created/destroyed per launch. Free lists grow on
+ * demand; checkout resets a returned CB/fence before reuse.
+ *
+ * Guard with Context::launch_engine_mutex for checkout, return, and queue submit.
+ */
+struct LaunchEngine {
+    VkCommandPool command_pool = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> free_command_buffers;
+    std::vector<VkFence> free_fences;
+};
+
+/**
+ * Per-job handles checked out from LaunchEngine (not owned by the job forever).
+ * Return via return_launch_resources after the fence has been waited.
+ */
+struct LaunchResources {
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
 };
 
 struct Context {
@@ -105,9 +130,11 @@ struct Context {
     // True only after init() fully succeeded.
     bool ready = false;
 
-    // These are both temporary until the cpu side @gpu calls are implemented (this however is a future poject and not on the current timeline)
     TransferEngine transfer_engine;
     std::mutex transfer_engine_mutex;
+
+    LaunchEngine launch_engine;
+    std::mutex launch_engine_mutex;
 };
 // Process-wide singleton accessor.
 Context& context();
@@ -119,5 +146,27 @@ void shutdown();
 bool available();
 // Requires ready context; returns device_name.
 const std::string& device_name();
+
+/**
+ * Checkout a command buffer + fence from Context::launch_engine.
+ * Caller records the CB, then submit_launch, then join waits the fence, then
+ * return_launch_resources. Holds launch_engine_mutex only for the checkout.
+ */
+LaunchResources checkout_launch_resources(Context& context);
+
+/**
+ * Return CB + fence to the free lists after the fence has been waited.
+ * Clears the handles in resources. Holds launch_engine_mutex.
+ */
+void return_launch_resources(Context& context, LaunchResources& resources);
+
+/**
+ * vkQueueSubmit for a launch CB under launch_engine_mutex (same lock domain as checkout).
+ */
+void submit_launch(
+    Context& context,
+    VkCommandBuffer command_buffer,
+    VkFence fence
+);
 
 } // namespace cthreads::gpu
