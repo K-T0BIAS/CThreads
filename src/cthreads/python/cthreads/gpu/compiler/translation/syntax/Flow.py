@@ -164,17 +164,22 @@ class GpuFlow(Flow):
         """
         Lower expression statements; string doc-exprs are ignored.
 
-        Calls are not supported until GPU builtins / math mirrors exist.
+        Call expressions go through GpuSyntax.expr (CallPlugins), e.g.
+        `__sync_threads()` -> GLSL barrier.
 
         #### Args:
         - node: ast.Expr = expression statement
         - ctx: GpuTranslationContext = current GPU translation state
 
         #### Returns
-        - list[str] = empty, or a comment for unsupported forms
+        - list[str] = GLSL statement lines, empty for docstrings, or a comment
         """
+        from .Syntax import GpuSyntax
+
         if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             return []
+        if isinstance(node.value, ast.Call):
+            return [f"    {GpuSyntax.expr(node.value, ctx)};"]
         return [
             f"    // unsupported statement: Expr ({type(node.value).__name__})"
         ]

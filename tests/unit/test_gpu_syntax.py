@@ -600,6 +600,34 @@ def test_unsupported_expr_stmt_comment():
     assert lines[0].startswith("    // unsupported")
 
 
+def test_sync_threads_expr_stmt_lowers_to_barrier():
+    def k(n: int) -> None:
+        pass
+
+    ctx = _ctx_for(k)
+    lines = _stmt("__sync_threads()", ctx)
+    assert any("barrier()" in line for line in lines)
+    assert any("memoryBarrierShared()" in line for line in lines)
+
+
+def test_barrier_arrive_and_wait_expr_stmt_same_barrier():
+    def k(n: int) -> None:
+        pass
+
+    ctx = _ctx_for(k)
+    lines = _stmt("Barrier.arrive_and_wait()", ctx)
+    assert any("barrier()" in line for line in lines)
+
+
+def test_barrier_constructor_rejected_in_gpu():
+    def k(n: int) -> None:
+        pass
+
+    ctx = _ctx_for(k)
+    with pytest.raises(TypeError, match="Barrier\\(\\.\\.\\.\\) construction"):
+        _stmt("Barrier(4)", ctx)
+
+
 def test_unsupported_stmt_comment():
     def k(n: int) -> None:
         pass
