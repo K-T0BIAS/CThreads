@@ -102,6 +102,8 @@ __all__ = [
 # Side-effect: register concrete plugins.
 from .indexes import IndexAttrPlugin  # noqa: E402
 from .math_calls import MathCallPlugin  # noqa: E402
+from .sync_threads import SyncThreadsPlugin  # noqa: E402
 
 register_attr(IndexAttrPlugin())
 register_call(MathCallPlugin())
+register_call(SyncThreadsPlugin())
