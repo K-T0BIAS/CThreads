@@ -20,8 +20,8 @@ python -m venv .venv
 # activate the venv, then:
 python -m pip install -U pip
 python -m pip install cthreads
-# optional Vulkan GPU build of _ext:
-# python -m pip install "cthreads[gpu]"
+# optional Vulkan GPU build (full package; do not also install cthreads):
+# python -m pip install cthreads-gpu
 ```
 
 Check:
@@ -172,12 +172,10 @@ native extension includes GPU support and the machine has a working Vulkan ICD
 | Install | `_ext` contents |
 |---------|-----------------|
 | `pip install cthreads` | CPU only (`CTHREADS_GPU` off) |
-| `pip install "cthreads[gpu]"` | Pulls **`cthreads-gpu`** (GPU built into `_ext`) |
-| `pip install cthreads-gpu` | Same GPU build; import path remains `cthreads` |
+| `pip install cthreads-gpu` | Full package with GPU in `_ext` (same import: `cthreads`) |
 
-Pip extras cannot change the files inside one wheel, so GPU support is a second
-project (`cthreads-gpu`) that provides the same `cthreads` package with Vulkan
-code linked in. Prefer one of the GPU installs above when you need `@Gpu`.
+These are **mutually exclusive**. Both ship `cthreads` / `_ext`; installing both
+overwrites the extension. Prefer `cthreads-gpu` when you need `@Gpu`.
 
 ```python
 from cthreads import gpu
@@ -193,9 +191,8 @@ only to run. User guides: [guide/gpu/README.md](./guide/gpu/README.md).
 
 ### Contributors (editable / source)
 
-Default editable builds leave `CTHREADS_GPU` **OFF**. The `[gpu]` extra installs the
-PyPI `cthreads-gpu` dependency and does **not** flip CMake for a local editable
-build. To compile GPU into your local `_ext`:
+Default editable builds leave `CTHREADS_GPU` **OFF**. To compile GPU into your
+local `_ext`:
 
 ```powershell
 # PowerShell
@@ -225,7 +222,7 @@ and [guide/gpu/errors.md](./guide/gpu/errors.md).
 ## Publishing to PyPI
 
 Wheels and the sdist are built on GitHub Actions when a GitHub Release is published.
-End users: `pip install cthreads` or `pip install "cthreads[gpu]"`. Maintainer
+End users: `pip install cthreads` or `pip install cthreads-gpu`. Maintainer
 walkthrough: [release.md](./release.md).
 
 ## Next

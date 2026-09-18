@@ -32,8 +32,8 @@ Published wheels (Linux / Windows x86_64) and the sdist are on [PyPI](https://py
 
 ```bash
 pip install cthreads
-# Vulkan GPU (@Gpu) support:
-pip install "cthreads[gpu]"
+# Vulkan GPU (@Gpu) support (full package; do not install alongside cthreads):
+pip install cthreads-gpu
 ```
 
 You still need a C++ compiler for the first `thread(...)` (user kernels). On Linux, wheels include a prebuilt `_ext`; CMake is only required if you install from the sdist or develop from source.

@@ -39,8 +39,7 @@ API is stable; cooperative tile patterns become useful once shared memory lands.
 | Command | Result |
 |---------|--------|
 | `pip install cthreads` | CPU wheel |
-| `pip install "cthreads[gpu]"` | CPU package + **`cthreads-gpu`** (GPU `_ext`) |
-| `pip install cthreads-gpu` | GPU wheel only |
+| `pip install cthreads-gpu` | Full package with GPU `_ext` (do not also install `cthreads`) |
 
 See [install.md](../../install.md#gpu-vulkan-compute) and [release.md](../../release.md).
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Retarget this tree to build/publish the cthreads-gpu PyPI distribution.
 
-Pip extras cannot select a different binary for the same project name. GPU-enabled
-wheels are therefore published as ``cthreads-gpu`` (same import path ``cthreads``),
-and ``pip install cthreads[gpu]`` depends on that package.
+GPU-enabled wheels are a separate PyPI project (``cthreads-gpu``) with the same
+import path ``cthreads``. Prefer ``pip install cthreads-gpu`` for GPU; do not
+install ``cthreads`` and ``cthreads-gpu`` together (they both ship ``_ext``).
 
 Run from the repo root before cibuildwheel / ``python -m build`` for the GPU job.
 """
@@ -23,24 +23,10 @@ def main() -> None:
     if 'name = "cthreads"' not in text:
         raise SystemExit("expected name = \"cthreads\" in pyproject.toml")
     text = text.replace('name = "cthreads"', 'name = "cthreads-gpu"', 1)
-    # Avoid a self-referential optional extra on the GPU distribution.
-    old_extra = 'gpu = ["cthreads-gpu=='
-    if old_extra in text:
-        # Replace the gpu extra line with an empty marker list.
-        lines: list[str] = []
-        for line in text.splitlines(keepends=True):
-            if line.startswith("gpu = ["):
-                lines.append(
-                    "gpu = []  "
-                    "# GPU wheels are this distribution; extra is a no-op here\n"
-                )
-            else:
-                lines.append(line)
-        text = "".join(lines)
     desc = 'description = "Compile @Threadable / @Thread Python into native C++ kernels and run them off the GIL."'
     gpu_desc = (
         'description = "cthreads with Vulkan GPU (@Gpu) support built into _ext. '
-        'Install via pip install cthreads[gpu] or pip install cthreads-gpu."'
+        'Install via pip install cthreads-gpu (do not install alongside cthreads)."'
     )
     if desc in text:
         text = text.replace(desc, gpu_desc, 1)

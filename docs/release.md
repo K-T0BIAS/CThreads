@@ -18,17 +18,16 @@ macOS wheels are skipped for now (CMake enables AVX2 on non-MSVC; Apple Silicon 
 
 ### CPU vs GPU install
 
-Pip extras cannot swap binary contents of one project name. GPU builds are therefore a
-**second PyPI project**:
+GPU builds are a **second PyPI project** (full package with `CTHREADS_GPU=ON`).
+Pick **one**; do not install both (they both ship `cthreads` / `_ext`).
 
 ```bash
 pip install cthreads           # CPU wheel
-pip install "cthreads[gpu]"    # installs cthreads + cthreads-gpu (GPU _ext)
-pip install cthreads-gpu       # GPU wheel only (also provides import cthreads)
+pip install cthreads-gpu       # CPU + GPU in _ext (same import: cthreads)
 ```
 
-Keep `project.version` and the `gpu = ["cthreads-gpu==..."]` pin equal on every release
-(the Release workflow checks this).
+Bump `project.version` for both artifacts on each release (GPU wheels are retargeted
+from the same `pyproject.toml` version).
 
 ### Trusted Publishing (one-time, both projects)
 
@@ -105,16 +104,15 @@ Then `main` cannot merge red tests.
 ```bash
 python -m pip install -U pip
 python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ cthreads
-# GPU build:
-python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "cthreads[gpu]"
+# GPU build (full package; do not also install cthreads):
+python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ cthreads-gpu
 ```
 
 `--extra-index-url` is only needed if TestPyPI cannot see some dependency (cthreads currently has none).
 
 ## Production release
 
-1. Set `version` in `pyproject.toml` **and** the matching pin
-   `gpu = ["cthreads-gpu==X.Y.Z"]` under `[project.optional-dependencies]`.
+1. Set `version` in `pyproject.toml` (must match the GitHub tag without the leading `v`).
 2. GitHub -> **Releases -> Draft a new release**.
 3. Tag `v0.1.0` (or whatever matches `project.version`). Target `main`.
 4. Click **Publish release**.
@@ -129,8 +127,8 @@ PyPI versions cannot be overwritten. If `0.1.0` is bad, yank it and ship `0.1.1`
 
 ```bash
 python -m pip install cthreads
-# or with Vulkan GPU support built into _ext:
-python -m pip install "cthreads[gpu]"
+# or with Vulkan GPU support built into _ext (do not install alongside cthreads):
+python -m pip install cthreads-gpu
 ```
 
 Windows 11 with Smart App Control on may still fail to **load** `cthreads_kernels.dll` (`LoadLibrary` 4551). That is a Windows policy, not a missing wheel. See [install.md](./install.md).

@@ -74,8 +74,8 @@ Patterns:
 
 | Symptom | Likely cause | What to try |
 |---------|--------------|-------------|
-| `VulkanNotBuiltError` | Extension built without GPU | `pip install "cthreads[gpu]"` or rebuild with `-DCTHREADS_GPU=ON` |
-| `available()` is False | No loader, no device, or CPU-only build | Update GPU drivers; confirm Vulkan ICD; install `cthreads[gpu]` / rebuild with GPU ON |
+| `VulkanNotBuiltError` | Extension built without GPU | `pip install cthreads-gpu` or rebuild with `-DCTHREADS_GPU=ON` |
+| `available()` is False | No loader, no device, or CPU-only build | Update GPU drivers; confirm Vulkan ICD; install `cthreads-gpu` / rebuild with GPU ON |
 | `VulkanLoaderNotFound` | Runtime library missing | Install/repair GPU drivers; on Linux install `vulkan-icd-loader` + vendor ICD |
 | `TypeError` on decorate | Unsupported annotation | Scalars and `list` of scalars only |
 | `TypeError` from `gpu()` | Missing `@Gpu` or bad arity | Check decorator and positional args |
