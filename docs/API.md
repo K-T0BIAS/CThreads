@@ -473,3 +473,36 @@ assert job.result() == 10
 | `d.get(k, default)` / `d.pop(k, default)` | Bare `d.get(k)` / `d.pop(k)` (needs Optional / exceptions) |
 | Bare-name receivers: `xs.append(v)` | Nested receivers: `self.items.append(v)` (not yet) |
 | Annotated locals + name/attr assign | `xs[i] = v` / `d[k] = v` plain assign (not yet) |
+
+---
+
+## 11. GPU (`cthreads.gpu`, 0.2.0)
+
+Public Vulkan compute path. Full narrative docs: [guide/gpu/README.md](./guide/gpu/README.md).
+Compact API: [guide/gpu/api.md](./guide/gpu/api.md).
+
+```python
+from cthreads.gpu import Gpu, GlobalIdx, gpu
+
+@Gpu
+def saxpy(n: int, a: float, x: list[float], y: list[float]) -> None:
+    i: int = GlobalIdx.x
+    if i >= n:
+        return
+    y[i] = a * x[i] + y[i]
+
+gpu(saxpy, len(x), 2.0, x, y).join()
+```
+
+| Piece | Role |
+|-------|------|
+| `@Gpu` | Mark + register a device kernel (`-> None`) |
+| `gpu(fn, *args)` | Compile if needed, launch, return `GpuJob` |
+| `GpuJob.join(download=True)` | Wait; download list args by default |
+| `GpuArena` | Keep lists resident across launches |
+| `GlobalIdx` / friends | Invocation indexes |
+| `cthreads.sync.__sync_threads` / `Barrier.arrive_and_wait()` | Workgroup barrier inside `@Gpu` |
+
+GPU types are narrower than CPU: scalars and `list` of scalars only. No mid-run
+Python observe. Shared memory is planned for **0.2.1**.
+

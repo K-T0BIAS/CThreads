@@ -11,8 +11,9 @@ Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist c
 
 ### Docs
 
-- [Install](./docs/install.md)
+- [Install](./docs/install.md) (includes GPU / Vulkan notes)
 - [Guides](./docs/index.md)
+- [GPU guides (0.2.0)](./docs/guide/gpu/README.md)
 - [Release (GitHub / PyPI)](./docs/release.md)
 - [Math & linalg](./docs/guide/math_and_linalg.md)
 - [Compiler notes](./docs/COMPILER.md)
@@ -31,6 +32,8 @@ Published wheels (Linux / Windows x86_64) and the sdist are on [PyPI](https://py
 
 ```bash
 pip install cthreads
+# Vulkan GPU (@Gpu) support:
+pip install "cthreads[gpu]"
 ```
 
 You still need a C++ compiler for the first `thread(...)` (user kernels). On Linux, wheels include a prebuilt `_ext`; CMake is only required if you install from the sdist or develop from source.
@@ -56,6 +59,7 @@ Annotate what should become a native kernel:
 
 - **`@Thread`** - functions / methods compiled to C++
 - **`@Threadable`** - classes compiled to C++ structs (shared state across kernels)
+- **`@Gpu`** - functions compiled to Vulkan compute (lists of scalars; see [GPU guides](./docs/guide/gpu/README.md))
 
 ## Supported types
 
@@ -178,5 +182,29 @@ result = await job
 ```
 
 Signature: `cthreads.thread(fn, *args, force: bool = False, **kwargs) -> Job`.
+
+----
+
+# GPU (`@Gpu`, from 0.2.0)
+
+Vulkan compute kernels use the same "annotate then launch" idea on a separate backend:
+
+```python
+from cthreads.gpu import Gpu, GlobalIdx, gpu
+
+@Gpu
+def saxpy(n: int, a: float, x: list[float], y: list[float]) -> None:
+    i: int = GlobalIdx.x
+    if i >= n:
+        return
+    y[i] = a * x[i] + y[i]
+
+x = [1.0, 2.0, 3.0, 4.0]
+y = [10.0, 20.0, 30.0, 40.0]
+gpu(saxpy, len(x), 2.0, x, y).join()
+```
+
+Full guides (concepts, best practices, examples): [docs/guide/gpu/README.md](./docs/guide/gpu/README.md).
+Install / drivers: [docs/install.md](./docs/install.md#gpu-vulkan-compute).
 
 ----

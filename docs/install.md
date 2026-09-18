@@ -20,6 +20,8 @@ python -m venv .venv
 # activate the venv, then:
 python -m pip install -U pip
 python -m pip install cthreads
+# optional Vulkan GPU build of _ext:
+# python -m pip install "cthreads[gpu]"
 ```
 
 Check:
@@ -159,12 +161,76 @@ Calling `thread(..., force=True)` while kernels are still loaded raises. Unload 
 | Editable import finds Python but not `_ext` | Re-run `pip install -e .` with the venv active so the post-build copy lands beside `cthreads/`. |
 | `LoadLibrary` error **4551** on Windows | Smart App Control blocking the unsigned `cthreads_kernels.dll` compiled in your project. Turn SAC off or use WSL/Linux. See [release.md](./release.md). |
 
+## GPU (Vulkan compute)
+
+From **0.2.0**, cthreads can run `@Gpu` kernels on a Vulkan compute device when the
+native extension includes GPU support and the machine has a working Vulkan ICD
+(normally installed with your GPU drivers).
+
+### End users (PyPI)
+
+| Install | `_ext` contents |
+|---------|-----------------|
+| `pip install cthreads` | CPU only (`CTHREADS_GPU` off) |
+| `pip install "cthreads[gpu]"` | Pulls **`cthreads-gpu`** (GPU built into `_ext`) |
+| `pip install cthreads-gpu` | Same GPU build; import path remains `cthreads` |
+
+Pip extras cannot change the files inside one wheel, so GPU support is a second
+project (`cthreads-gpu`) that provides the same `cthreads` package with Vulkan
+code linked in. Prefer one of the GPU installs above when you need `@Gpu`.
+
+```python
+from cthreads import gpu
+
+if gpu.available():
+    print(gpu.device_name())
+else:
+    print("GPU path not usable (no Vulkan ICD / device); CPU @Thread still works")
+```
+
+You need GPU **drivers** with a Vulkan ICD. You do **not** need the LunarG SDK
+only to run. User guides: [guide/gpu/README.md](./guide/gpu/README.md).
+
+### Contributors (editable / source)
+
+Default editable builds leave `CTHREADS_GPU` **OFF**. The `[gpu]` extra installs the
+PyPI `cthreads-gpu` dependency and does **not** flip CMake for a local editable
+build. To compile GPU into your local `_ext`:
+
+```powershell
+# PowerShell
+$env:CMAKE_ARGS="-DCTHREADS_GPU=ON"
+pip install -e ".[test]"
+```
+
+```bash
+export CMAKE_ARGS="-DCTHREADS_GPU=ON"
+pip install -e ".[test]"
+```
+
+Or:
+
+```bash
+pip install -e . --config-settings=cmake.define.CTHREADS_GPU=ON
+```
+
+Building with `CTHREADS_GPU=ON` needs Vulkan **headers** (LunarG SDK or distro
+`libvulkan-dev`). Runtime still loads the loader dynamically; end users need
+drivers, not the SDK.
+
+Release packaging (CPU + GPU wheels): [release.md](./release.md).
+More detail: [vk_guide/03-sdk-runtime-drivers.md](./vk_guide/03-sdk-runtime-drivers.md)
+and [guide/gpu/errors.md](./guide/gpu/errors.md).
+
 ## Publishing to PyPI
 
-Wheels and the sdist are built on GitHub Actions when a GitHub Release is published. End users install with `pip install cthreads` (see [From PyPI](#from-pypi-recommended) above). Maintainer walkthrough: [release.md](./release.md).
+Wheels and the sdist are built on GitHub Actions when a GitHub Release is published.
+End users: `pip install cthreads` or `pip install "cthreads[gpu]"`. Maintainer
+walkthrough: [release.md](./release.md).
 
 ## Next
 
 - [README](../README.md) - `@Thread` / `@Threadable` and first `thread(...)` / `join` / `await`
 - [concepts](./concepts.md) - GIL, pack / writeback, rules
+- [GPU guides](./guide/gpu/README.md) - `@Gpu`, `gpu()`, arena, barriers
 - [Guides](./index.md) - pools, sync, jobs, math

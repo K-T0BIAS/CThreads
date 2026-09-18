@@ -1,8 +1,12 @@
 # Vulkan guide for cthreads (compute path)
 
+**Writing `@Gpu` kernels as an application author?** Start with the user guides:
+[docs/guide/gpu/README.md](../guide/gpu/README.md). This folder is the deeper
+Vulkan substrate tutorial for people changing the C++ GPU backend.
+
 This folder is a **project-specific** Vulkan tutorial for **cthreads contributors**.
 It covers the compute path used by the GPU backend: buffers, copies, descriptors,
-shaders, and launch/wait — **not** the full graphics stack (swapchains, render
+shaders, and launch/wait -- **not** the full graphics stack (swapchains, render
 passes, images, and so on).
 
 Architecture choices here match the cthreads GPU design (same Python types as the

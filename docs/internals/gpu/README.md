@@ -1,10 +1,17 @@
 # GPU internals (C++ Vulkan path)
 
-This folder documents the C++ GPU modules under `src/cthreads/cpp/gpu/`. It is written for newcomers who know C++ and maybe Python, but have never used Vulkan. Product-facing Python APIs such as `gpu()` and `@Gpu` are not finished yet. What you see here is the permanent substrate those APIs will call.
+This folder documents the C++ GPU modules under `src/cthreads/cpp/gpu/`. It is
+written for contributors who know C++ (and maybe Python) but may not know Vulkan.
+
+**Application authors** should use the product guides first:
+[docs/guide/gpu/README.md](../../guide/gpu/README.md). Those cover `@Gpu`,
+`gpu()`, `GpuArena`, and barriers for **0.2.0**. This folder is the permanent
+substrate those APIs call.
 
 Related reading:
 
-- Contributor Vulkan tutorial style notes: [docs/vk_guide/README.md](../../vk_guide/README.md)
+- User GPU guides: [docs/guide/gpu/README.md](../../guide/gpu/README.md)
+- Contributor Vulkan tutorial: [docs/vk_guide/README.md](../../vk_guide/README.md)
 - Future work (CPU `@Thread` calling GPU): [docs/gpu_future_cpu_to_gpu.md](../../gpu_future_cpu_to_gpu.md)
 - Build flag: CMake `CTHREADS_GPU=ON` compiles these sources into `cthreads._ext`
 
@@ -68,9 +75,13 @@ GPU code is compiled only when `CTHREADS_GPU` is on. The extension still loads `
 
 ## What is intentionally not here yet
 
-- Public `gpu()` entry and `@Gpu` SPIR-V emit
-- Threadable / schema marshal writeback (list[float]/list[int] writeback is in `SpawnedGpuKernel::join`)
+Product Python (`@Gpu` / `gpu()` / list writeback / arena / workgroup barriers)
+lives in `src/cthreads/python/cthreads/gpu/` and is documented for users in
+[guide/gpu](../../guide/gpu/README.md). Remaining substrate / dialect gaps include:
+
+- Workgroup shared memory (planned product **0.2.1**)
+- Device atomics in the dialect
+- Threadable / nested object marshal on GPU
 - Inflight job store (header stub only)
 - Dummy SSBOs for empty list slots in `update_descriptors`
-
-Those build on the modules documented here.
+- CPU `@Thread` launching `@Gpu` ([gpu_future_cpu_to_gpu.md](../../gpu_future_cpu_to_gpu.md))

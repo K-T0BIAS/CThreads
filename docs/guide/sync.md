@@ -477,3 +477,4 @@ handle.destroy()
 * [concepts.md](../concepts.md) - pack / writeback overview
 * [sync_state_docs.md](../sync_state_docs.md) - bridge, TLS, by-ref packs
 * [math_and_linalg.md](./math_and_linalg.md) - arrays (separate from TBuffer)
+* [gpu/sync.md](./gpu/sync.md) - GPU workgroup barriers (`__sync_threads` / `Barrier.arrive_and_wait` inside `@Gpu`)
