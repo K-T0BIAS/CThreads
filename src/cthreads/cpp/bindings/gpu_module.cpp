@@ -3,7 +3,9 @@
 // LICENSE file in the root directory of this source tree.
 
 #include "gpu_module.hpp"
+#ifdef CTHREADS_GPU_TESTING
 #include "gpu_testing_module.hpp"
+#endif
 
 #include "../gpu/headers/context.hpp"
 #include "../gpu/headers/compile_glsl.hpp"
@@ -267,7 +269,9 @@ void bind_gpu(py::module_& parent) {
             "Download a registered device-local buffer into bytes (D2H)."
         );
 
-    // Test-only pack round-trips live in a separate submodule / translation unit
-    // so product bindings stay small. Not re-exported by cthreads.gpu.
+    // Test-only pack/shader smokes: only when local gpu/testing/ is present
+    // (gitignored). Product CI/wheels build without _ext.gpu.testing.
+#ifdef CTHREADS_GPU_TESTING
     bind_gpu_testing(g);
+#endif
 }

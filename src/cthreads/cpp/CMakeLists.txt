@@ -63,7 +63,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(_ext PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
-# --- Standalone linalg micro-bench (dot + matmul, light/medium/heavy) --------
+# --- Standalone linalg micro-bench (dot + matmul, light/medium/heavy) (contact @K-T0BIAS for src) --------
 set(_CTHREADS_BENCH_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../demo/bench/cpp/linalg_bench.cpp"
 )
@@ -89,7 +89,7 @@ if(EXISTS "${_CTHREADS_BENCH_SRC}")
     message(STATUS "linalg_bench: ${_CTHREADS_BENCH_SRC}")
 endif()
 
-# Python package dir (sibling of this cpp/ tree). Never use cpp/ as output/build.
+# Python package dir (sibling of this cpp/ tree).
 set(_cthreads_py_out "${CMAKE_CURRENT_SOURCE_DIR}/../python/cthreads")
 
 # Bare cmake (no pip): build straight into the package tree.
@@ -177,11 +177,28 @@ if(CTHREADS_GPU)
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/descriptors.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/module.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpu/impl/compile_glsl.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/pack_roundtrip.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/shader_smoke.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_module.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_testing_module.cpp"
     )
+
+    # Local-only substrate smokes under gpu/testing/ (gitignored via testing/).
+    # Product GPU builds (CI / wheels) do not need them. Python coverage of the
+    # public path lives in repo tests/;
+    set(_cthreads_gpu_testing_pack
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/pack_roundtrip.cpp")
+    set(_cthreads_gpu_testing_smoke
+        "${CMAKE_CURRENT_SOURCE_DIR}/gpu/testing/shader_smoke.cpp")
+    if(EXISTS "${_cthreads_gpu_testing_pack}" AND EXISTS "${_cthreads_gpu_testing_smoke}")
+        message(STATUS "cthreads GPU: local gpu/testing helpers ON")
+        target_sources(_ext PRIVATE
+            "${_cthreads_gpu_testing_pack}"
+            "${_cthreads_gpu_testing_smoke}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/bindings/gpu_testing_module.cpp"
+        )
+        target_compile_definitions(_ext PRIVATE CTHREADS_GPU_TESTING=1)
+    else()
+        message(STATUS "cthreads GPU: local gpu/testing helpers OFF (not in tree)")
+    endif()
+
     target_include_directories(_ext PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu/headers
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu

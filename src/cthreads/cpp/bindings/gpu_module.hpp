@@ -6,6 +6,7 @@ namespace py = pybind11;
 
 /**
  * Register ``cthreads._ext.gpu`` (probe API, launch_gpu_kernel / GpuJob,
- * GpuState singleton, and test-only ``testing`` submodule).
+ * GpuState singleton). Optional ``testing`` submodule only when
+ * CTHREADS_GPU_TESTING is set (local gpu/testing/ sources present).
  */
 void bind_gpu(py::module_& parent);

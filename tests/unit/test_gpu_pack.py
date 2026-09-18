@@ -27,7 +27,10 @@ def _require_gpu_testing():
     if ext is None:
         pytest.skip("cthreads built without CTHREADS_GPU (_ext.gpu missing)")
     if not hasattr(ext, "testing"):
-        pytest.skip("_ext.gpu.testing missing (rebuild with CTHREADS_GPU=ON)")
+        pytest.skip(
+            "_ext.gpu.testing missing (local gpu/testing/ not in tree; "
+            "optional gitignored helpers)"
+        )
     if not gpu.available():
         pytest.skip("Vulkan loader/device not available in this environment")
     return ext.testing
