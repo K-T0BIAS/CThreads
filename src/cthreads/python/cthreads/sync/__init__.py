@@ -4,6 +4,8 @@ cthreads.sync - host sync / TBuffer API.
 - Annotation: `TBuffer[...]` (from types)
 - Host alloc: `create_tbuffer` / `TBufferHandle` / …
 - Native locks/events: re-exported from `cthreads._ext.sync` when present
+- GPU workgroup barrier stub: `__sync_threads`; inside `@Gpu` also
+  `Barrier.arrive_and_wait()` (same GLSL lowering, no Barrier(...) call)
 """
 
 from __future__ import annotations
@@ -18,6 +20,24 @@ from .tbuffer_host import (
     tbuffer_ptr,
     tbuffer_read_copy_ptr,
 )
+
+
+def __sync_threads() -> None:
+    """
+    Workgroup barrier stub (CUDA-style).
+
+    Only valid inside `@Gpu` bodies; compiled to GLSL barrier() /
+    memoryBarrierShared(). Same device sync as Barrier.arrive_and_wait()
+    on the GPU path.
+
+    #### Raises
+    - RuntimeError = called from ordinary Python (not compiled @Gpu)
+    """
+    raise RuntimeError(
+        "cthreads.sync.__sync_threads() is only valid inside @Gpu bodies "
+        "(workgroup barrier; compiled to GLSL barrier())"
+    )
+
 
 try:
     from cthreads import _ext as _ext
@@ -52,4 +72,5 @@ __all__ = [
     "RWLock",
     "Barrier",
     "TBufferI64",
+    "__sync_threads",
 ]

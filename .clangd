@@ -1,0 +1,20 @@
+# clangd config for cthreads (Cursor / VS Code clangd).
+# Paths are relative to this file (repo root), except Vulkan SDK.
+
+CompileFlags:
+  Add:
+    - -std=c++17
+    # Match CMake CTHREADS_GPU=ON so #ifdef CTHREADS_WITH_GPU paths analyze correctly.
+    - -DCTHREADS_WITH_GPU=1
+    # Project includes (same as CMake target_include_directories for GPU builds).
+    - -Isrc/cthreads/cpp/headers
+    - -Isrc/cthreads/cpp/gpu/headers
+    # Vulkan headers from local SDK (VULKAN_SDK=C:\VulkanSDK\1.4.357.0).
+    # Update this -I if you install a newer SDK version.
+    - -IC:/VulkanSDK/1.4.357.0/Include
+
+Diagnostics:
+  UnusedIncludes: None
+
+Index:
+  Background: Build

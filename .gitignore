@@ -17,6 +17,7 @@ dist/
 *.dylib
 .cthreads_cache.json
 .pytest_cache/
+.vscode/
 
 # CMake / MSVC litter - must never land in the source tree
 src/cthreads/cpp/CMakeCache.txt
@@ -51,6 +52,7 @@ api/
 # >>> cthreads (auto)
 __Thread__/
 __Threadable__/
+__Gpu__/
 .cthreads_cache.json
 cthreads_kernels.dll
 cthreads_kernels.so
@@ -60,3 +62,5 @@ libcthreads_kernels.dylib
 # <<< cthreads (auto)
 
 todo.md
+# demo artifacts
+*.gif 

@@ -87,5 +87,6 @@ One important caveat: during the run, Python-side memory is **not** live-updated
 | Sync / locks / state | [guide/sync.md](./guide/sync.md), [sync_state_docs](./sync_state_docs.md) |
 | Jobs / async | [guide/jobs.md](./guide/jobs.md) |
 | Math and linalg | [guide/math_and_linalg.md](./guide/math_and_linalg.md) |
+| GPU (`@Gpu` / `gpu()`, 0.2.0) | [guide/gpu/README.md](./guide/gpu/README.md) |
 | Compiler details | [COMPILER.md](./COMPILER.md) |
 | API surface | [README](../README.md), [API.md](./API.md) |
