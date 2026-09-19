@@ -1,11 +1,26 @@
 
 ![LOGO](./docs/__ressources/CTHREADS_03_1.svg)
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/K-T0BIAS/CThreads/blob/main/colab/Mandelbrot.ipynb)
+
 ----
 
-**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL** allowing true concurrency without `multiprocessing`'s process boundaries and pickling tax.
+**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL**, allowing true concurrency without `multiprocessing`'s process boundaries and pickling tax. Optional **Vulkan GPU** kernels (`@Gpu`) ship as a separate install ( **`cthreads-gpu`**) same `import cthreads`, do not install alongside the CPU-only `cthreads` wheel.
 
-Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist covers the usual scalars and containers, plus your own Threadable types. Code runs at native speed while you keep a Python-shaped control flow (jobs, pools, sync).
+Use `@Thread` / `@Threadable` on the CPU path and `@Gpu` when you installed `cthreads-gpu`. The whitelist covers the usual scalars and containers, plus your own Threadable types. Code runs at native speed while you keep a Python-shaped control flow (jobs, pools, sync; GPU: `gpu()` / `join`).
+
+| cthreads SPH | Python + NumPy SPH |
+|:---:|:---:|
+| realtime | linear speedup up to **100× realtime** on this scene |
+| <img src="./docs/__ressources/cthreads_w6.gif" width="360" alt="cthreads SPH simulation" /> | <img src="./docs/__ressources/numpy_w6.gif" width="360" alt="Python + NumPy SPH simulation" /> |
+
+**Fig. 1.** Side-by-side Smoothed Particle Hydrodynamics (SPH) fluid demo under identical scene setup (same particle set, forces, timestep, and camera).
+**Left:** dynamics advanced with **cthreads** (`@Thread` kernels on a `ThreadPool`, shared native buffers). **Right:** the same solver expressed as **Python + NumPy** array kernels on the host. Overlay text at the top of each clip reports live run metrics; the **second-to-last** value is **realtime speedup** (simulated time per unit wall-clock). On this scene the NumPy path reaches up to about **100× realtime**; the cthreads path is shown for visual parity of the fluid, not as a matched FPS bake-off in the GIF encode.
+
+---
+
+Interactive CPU Mandelbrot (pool + Shared + TBuffer):
+[Open in Colab](https://colab.research.google.com/github/K-T0BIAS/CThreads/blob/main/colab/Mandelbrot.ipynb).
 
 ----
 
@@ -13,7 +28,7 @@ Use `@Thread` on functions/methods and `@Threadable` on classes. The whitelist c
 
 - [Install](./docs/install.md) (includes GPU / Vulkan notes)
 - [Guides](./docs/index.md)
-- [GPU guides (0.2.0)](./docs/guide/gpu/README.md)
+- [GPU guides (0.2.0+)](./docs/guide/gpu/README.md)
 - [Release (GitHub / PyPI)](./docs/release.md)
 - [Math & linalg](./docs/guide/math_and_linalg.md)
 - [Compiler notes](./docs/COMPILER.md)

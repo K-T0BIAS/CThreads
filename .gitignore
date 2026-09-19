@@ -62,5 +62,6 @@ libcthreads_kernels.dylib
 # <<< cthreads (auto)
 
 todo.md
-# demo artifacts
-*.gif 
+# demo artifacts (allow README showcase gifs)
+*.gif
+!docs/__ressources/*.gif
