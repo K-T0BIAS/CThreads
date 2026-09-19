@@ -18,6 +18,98 @@ from .frontend.Registry import REGISTRY
 
 BINARY_STEM = "cthreads_kernels"
 
+# Installed wheel layout (see CMakeLists.txt install rules):
+#   site-packages/cthreads/_native/headers/shared_host.hpp
+#   site-packages/cthreads/_native/runtime/sync_bridge.cpp
+# Editable / monorepo layout:
+#   .../python/cthreads/build.py  ->  .../cpp/headers , .../cpp/runtime
+_NATIVE_DIRNAME = "_native"
+
+
+def _package_dir() -> Path:
+    """Directory containing this package's `build.py` (installed or editable)."""
+    return Path(__file__).resolve().parent
+
+
+def _packaged_native_root() -> Path | None:
+    """
+    Return `cthreads/_native` when the wheel-installed kernel assets exist.
+
+    #### Returns
+    - Path | None = native root, or None when not a packaged install
+    """
+    root = _package_dir() / _NATIVE_DIRNAME
+    if (root / "headers" / "shared_host.hpp").is_file():
+        return root
+    return None
+
+
+def _monorepo_cpp_root() -> Path | None:
+    """
+    Return `.../cthreads/cpp` for editable/source checkouts.
+
+    `build.py` lives at `.../python/cthreads/build.py`; cpp is a sibling of
+    `python/`.
+
+    #### Returns
+    - Path | None = cpp root, or None when the tree is not present
+    """
+    # .../python/cthreads/build.py -> parents[2] == .../cthreads (src/cthreads)
+    cpp = _package_dir().parent.parent / "cpp"
+    if (cpp / "headers" / "shared_host.hpp").is_file():
+        return cpp
+    return None
+
+
+def runtime_headers_dir() -> Path:
+    """
+    Directory that must be on the kernel compile include path.
+
+    Prefers wheel-installed `_native/headers`, then the monorepo `cpp/headers`.
+    Raises if neither exists — silent omission caused PyPI/Colab kernel builds to
+    fail with missing `shared_host.hpp`.
+
+    #### Returns
+    - Path = include directory containing `shared_host.hpp`
+
+    #### Raises
+    - RuntimeError = bundled headers are missing from this install
+    """
+    packaged = _packaged_native_root()
+    if packaged is not None:
+        return packaged / "headers"
+    mono = _monorepo_cpp_root()
+    if mono is not None:
+        return mono / "headers"
+    raise RuntimeError(
+        "cthreads kernel runtime headers are missing from this install. "
+        "Expected either:\n"
+        f"  - {_package_dir() / _NATIVE_DIRNAME / 'headers' / 'shared_host.hpp'}\n"
+        "    (PyPI / wheel install), or\n"
+        f"  - {_package_dir().parent.parent / 'cpp' / 'headers' / 'shared_host.hpp'}\n"
+        "    (editable / source checkout).\n"
+        "Reinstall from a wheel built with current CMake install rules, or use "
+        "an editable install from the full repository."
+    )
+
+
+def sync_bridge_source() -> Path | None:
+    """
+    Path to `sync_bridge.cpp` when present (optional link input).
+
+    #### Returns
+    - Path | None = source file, or None if this install has no bridge
+    """
+    packaged = _packaged_native_root()
+    if packaged is not None:
+        p = packaged / "runtime" / "sync_bridge.cpp"
+        return p if p.is_file() else None
+    mono = _monorepo_cpp_root()
+    if mono is not None:
+        p = mono / "runtime" / "sync_bridge.cpp"
+        return p if p.is_file() else None
+    return None
+
 
 def _locate_vs_cl() -> str | None:
     pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
@@ -127,20 +219,10 @@ def _collect_sources_and_includes() -> tuple[list[Path], list[Path]]:
         include_dirs.add(unit.hpp_path.resolve().parent)
         thread_dirs.add(unit.hpp_path.resolve().parent)
 
-    # Bundled runtime headers: .../python/cthreads/V2/build.py -> .../cpp/headers
-    runtime_headers = (
-        Path(__file__).resolve().parent.parent.parent / "cpp" / "headers"
-    )
-    if runtime_headers.is_dir():
-        include_dirs.add(runtime_headers)
-
-    sync_bridge = (
-        Path(__file__).resolve().parent.parent.parent
-        / "cpp"
-        / "runtime"
-        / "sync_bridge.cpp"
-    )
-    if sync_bridge.is_file():
+    # Bundled runtime headers + optional sync_bridge (wheel _native/ or monorepo cpp/).
+    include_dirs.add(runtime_headers_dir())
+    sync_bridge = sync_bridge_source()
+    if sync_bridge is not None:
         sources.append(sync_bridge)
 
     for thread_dir in thread_dirs:

@@ -135,6 +135,19 @@ else()
     )
 endif()
 
+# Kernel DLL build needs these next to the installed package (PyPI wheels).
+# Editable installs resolve headers from the monorepo cpp/ tree via build.py.
+# Layout: cthreads/_native/headers/... and cthreads/_native/runtime/sync_bridge.cpp
+# so sync_bridge's `#include "../headers/sync/syncState.hpp"` stays valid.
+if(DEFINED SKBUILD AND NOT (DEFINED SKBUILD_STATE AND SKBUILD_STATE STREQUAL "editable"))
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/headers/"
+        DESTINATION cthreads/_native/headers
+    )
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/runtime/sync_bridge.cpp"
+        DESTINATION cthreads/_native/runtime
+    )
+endif()
+
 message(STATUS "Python:  ${Python_EXECUTABLE} (${Python_VERSION})")
 if(DEFINED SKBUILD_STATE)
     message(STATUS "SKBUILD_STATE: ${SKBUILD_STATE}")
