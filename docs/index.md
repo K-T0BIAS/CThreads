@@ -3,6 +3,7 @@
 | description | link | 
 |-|-|
 | **Install**: Python, C++ compiler, CMake (including CMake/Ninja in a venv); GPU / Vulkan notes | [link](./install.md) |
+| **FAQ**: common pitfalls, marshal traps, cthreads vs cthreads-gpu, where to ask | [link](./FAQ.md) |
 | Important ``concepts for beginners``. CThreads ``tricks``, ``best practices`` and an ``introduction to multithreading`` | [link](./concepts.md) | 
 | `@Thread` / `@Threadable`: types, kernel language subset, structs, methods, constructor | [link](./guide/thread_and_threadable.md) | 
 | Indepth guide on ``Thread Pools`` for professional thread management | [link](./guide/pools.md) |

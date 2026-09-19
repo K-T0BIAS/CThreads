@@ -27,6 +27,7 @@ Interactive CPU Mandelbrot (pool + Shared + TBuffer):
 ### Docs
 
 - [Install](./docs/install.md) (includes GPU / Vulkan notes)
+- [FAQ](./docs/FAQ.md) (pitfalls, marshal, GPU package split)
 - [Guides](./docs/index.md)
 - [GPU guides (0.2.0+)](./docs/guide/gpu/README.md)
 - [Release (GitHub / PyPI)](./docs/release.md)
