@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Retarget this tree to build/publish the cthreads-gpu PyPI distribution.
 
-GPU-enabled wheels are a separate PyPI project (``cthreads-gpu``) with the same
-import path ``cthreads``. Prefer ``pip install cthreads-gpu`` for GPU; do not
-install ``cthreads`` and ``cthreads-gpu`` together (they both ship ``_ext``).
+GPU-enabled wheels are a separate PyPI project (`cthreads-gpu`) with the same
+import path `cthreads`. Prefer `pip install cthreads-gpu` for GPU; do not
+install `cthreads` and `cthreads-gpu` together (they both ship `_ext`).
 
-Run from the repo root before cibuildwheel / ``python -m build`` for the GPU job.
+Run from the repo root before cibuildwheel / `python -m build` for the GPU job.
 """
 
 from __future__ import annotations
