@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: FAQ
+    url: https://github.com/K-T0BIAS/CThreads/blob/main/docs/FAQ.md
+    about: Common install, package, and kernel questions before opening an issue.
+  - name: Discussions Q&A
+    url: https://github.com/K-T0BIAS/CThreads/discussions/categories/q-a
+    about: Ask usage questions and share tips with other users.
+  - name: Announcements
+    url: https://github.com/K-T0BIAS/CThreads/discussions/categories/announcements
+    about: Release notes and project updates (read-only for most users).

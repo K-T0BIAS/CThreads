@@ -100,7 +100,7 @@ from cthreads import Thread
 
 @Thread
 def my_example_function() -> None:
-    return None
+    return
 ```
 
 ### Rules
@@ -108,20 +108,20 @@ def my_example_function() -> None:
 1. **Typed parameters and a return type** (use `-> None` when there is no value).
 2. **No `*args` / `**kwargs`.**
 3. **Locals must be annotated** with an allowed type (`x: int = 0`).
-4. Inside the body, only call other **`@Thread`** functions/methods, plus **`python math (import math)`**, **`cthreads.modules`**, not arbitrary Python.
+4. Inside the body, only call other **`@Thread`** functions/methods, plus supported libraries (`math`, `cthreads.math`, `cthreads.sync`, `cthreads.linalg`) and builtins like `len` / `range`. No arbitrary Python.
 5. Return values must match the declared return type.
 
 ```python
 from cthreads import Thread
 
 @Thread
-def example_function(val1: int, val2: list[float], val3: ExampleClass) -> ExampleClass:
-    var4: str = "hello there"
-    var5: int = 42
-
-    val3.some_string_attr = var4
-    val3.some_int_attr = var5
-    return val3
+def example_function(scale: float, values: list[float]) -> float:
+    total: float = 0.0
+    i: int = 0
+    while i < len(values):
+        total += scale * values[i]
+        i += 1
+    return total
 ```
 
 ## `@Threadable`
@@ -165,7 +165,7 @@ class ExampleClass:
 obj = ExampleClass(0, "1", [2.0, 3.0])
 
 obj.method1()
-print(obj.attr1, obj.method2(" 1"))  # 1  1 1
+print(obj.attr1, obj.method2(" 1"))  # 1 1 1
 ```
 
 **Why Threadables?**
@@ -179,6 +179,7 @@ print(obj.attr1, obj.method2(" 1"))  # 1  1 1
 # Run a `@Thread`
 
 ```python
+import asyncio
 import cthreads
 from cthreads import Thread
 
@@ -190,12 +191,16 @@ def example_function(lhs: float, rhs: float, count: int) -> float:
 
 # Sync: Job -> join -> result
 job = cthreads.thread(example_function, 1.5, 2.0, 200)
-job.join() # starts if needed; blocks this thread (GIL released in C++)
+job.join()  # starts if needed; blocks this thread (GIL released in C++)
 result = job.result()
 
 # Async: await auto-starts and returns the result (event loop stays free)
-job = cthreads.thread(example_function, 1.5, 2.0, 200)
-result = await job
+async def main() -> None:
+    job = cthreads.thread(example_function, 1.5, 2.0, 200)
+    result = await job
+    print(result)
+
+asyncio.run(main())
 ```
 
 Signature: `cthreads.thread(fn, *args, force: bool = False, **kwargs) -> Job`.
@@ -213,7 +218,7 @@ from cthreads.gpu import Gpu, GlobalIdx, gpu
 def saxpy(n: int, a: float, x: list[float], y: list[float]) -> None:
     i: int = GlobalIdx.x
     if i >= n:
-        return
+        return # do not return None. Simply return
     y[i] = a * x[i] + y[i]
 
 x = [1.0, 2.0, 3.0, 4.0]
