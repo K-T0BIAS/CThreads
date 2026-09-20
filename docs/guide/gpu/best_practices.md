@@ -30,7 +30,7 @@ in 0.2.0. Pair with [concepts.md](./concepts.md) and the worked samples in
 | No mid-run Python observe | You need `__sync_state` / locks / TBuffer |
 
 A slow GPU path is often a small problem size, accidental per-iteration download,
-or an algorithm that needs atomics/shared memory that 0.2.0 does not provide yet.
+or an algorithm that needs atomics or shared memory that the public GPU dialect does not provide yet.
 
 # Keep kernels regular
 
@@ -103,8 +103,8 @@ workgroup-local ([sync.md](./sync.md)).
 
 - Use `__sync_threads()` or `Barrier.arrive_and_wait()` only inside `@Gpu`.
 - Do not construct `Barrier(...)` in device code.
-- In 0.2.0, barriers are forward-compatible API; shared-memory tile recipes arrive
-  in 0.2.1. Prefer host multi-pass for real algorithms until then.
+- Barriers are a forward-compatible API. Shared-memory tile recipes are not public
+  yet. Prefer host multi-pass for real algorithms until shared memory lands.
 
 # Respect float32
 

@@ -9,10 +9,23 @@ build-backend = "scikit_build_core.build"
 readme = "ReadMe.md"
 name = "cthreads"
 version = "0.2.1"
-description = "Compile @Threadable / @Thread Python into native C++ kernels and run them off the GIL."
+description = "Typed Python to C++ threads (off the GIL). Jobs, pools, sync. Optional Vulkan @Gpu via cthreads-gpu."
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-keywords = ["threading", "multithreading", "codegen", "python compiler", "cpp", "pybind11"]
+keywords = [
+    "threading",
+    "multithreading",
+    "gil",
+    "codegen",
+    "python compiler",
+    "cpp",
+    "pybind11",
+    "performance",
+    "vulkan",
+    "gpu",
+    "spir-v",
+    "thread-pool",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

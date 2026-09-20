@@ -149,7 +149,7 @@ See [thread_and_threadable.md](./guide/thread_and_threadable.md) and [concepts.m
 
 The kernel edits the **pack** (the C++ copy). By default the live Python objects update on `join` writeback (or when you sync). Mid-run visibility needs `__sync_state()` / `job.sync_state()`, `Shared[T]`, or a **TBuffer** generation path.
 
-See [sync.md](./guide/sync.md) and [sync_state_docs.md](./sync_state_docs.md).
+See [sync.md](./guide/sync.md) and [concepts.md](./concepts.md).
 
 ---
 
@@ -263,4 +263,6 @@ Use the Colab notebook linked from the README (Open in Colab badge). It installs
 | GIL and pack model | [concepts.md](./concepts.md) |
 | Pools and Shared waves | [guide/pools.md](./guide/pools.md) |
 | Sync and TBuffer | [guide/sync.md](./guide/sync.md) |
-| GPU user guides | [guide/gpu/README.md](./guide/gpu/README.md) |
+| GPU user guides | [guide/gpu/quickstart.md](./guide/gpu/quickstart.md) |
+| Guides catalog | [index.md](./index.md) |
+| CPU quickstart | [quickstart.md](./quickstart.md) |

@@ -9,8 +9,8 @@ CPU `Barrier(parties)` class, and it is not a whole-grid barrier.
 - [API: two names, one lowering](#api-two-names-one-lowering)
 - [Scope: workgroup only](#scope-workgroup-only)
 - [CPU Barrier vs GPU barrier](#cpu-barrier-vs-gpu-barrier)
-- [What you can do in 0.2.0](#what-you-can-do-in-020)
-- [Shared memory (0.2.1)](#shared-memory-021)
+- [What you can do today](#what-you-can-do-today)
+- [Shared memory later](#shared-memory-later)
 - [Rejected forms](#rejected-forms)
 - [Host-side phases instead of grid barriers](#host-side-phases-instead-of-grid-barriers)
 
@@ -78,7 +78,7 @@ barrier instance.
 Sharing the import surface is intentional. Sharing the implementation is not:
 the compiler backend chooses the lowering.
 
-# What you can do in 0.2.0
+# What you can do today
 
 Barriers are available so cooperative patterns can be authored against a stable
 API. **Without workgroup shared memory**, the practical uses inside a single
@@ -90,12 +90,12 @@ yet. You can still:
   (global phases).
 - Use residency (`GpuArena`) so those phases do not thrash host memory.
 
-# Shared memory (0.2.1)
+# Shared memory later
 
-Planned follow-up: declare workgroup-local shared storage and use barriers between
-produce/consume steps inside the group (classic tiled reductions, stencils, and
-so on). Until that lands, prefer host multi-pass for algorithms that need
-cross-element staging beyond ordinary list buffers.
+A later release is planned to declare workgroup-local shared storage and use
+barriers between produce/consume steps inside the group (classic tiled
+reductions, stencils, and so on). Until that lands, prefer host multi-pass for
+algorithms that need cross-element staging beyond ordinary list buffers.
 
 # Rejected forms
 

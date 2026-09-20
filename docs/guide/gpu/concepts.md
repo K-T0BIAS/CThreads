@@ -165,12 +165,11 @@ stencil-like passes over arrays.
 
 Documented so expectations stay accurate:
 
-- Workgroup **shared memory** arrays (planned for 0.2.1)
+- Workgroup **shared memory** arrays (planned for a later release)
 - Device **atomics** in the dialect
 - Grid-wide barriers inside one kernel
 - Public buffer objects / explicit Vulkan handles on the default path
-- Launching `@Gpu` from inside `@Thread` (future design note:
-  [gpu_future_cpu_to_gpu.md](../../gpu_future_cpu_to_gpu.md))
+- Launching `@Gpu` from inside `@Thread` (not in the public path yet)
 - macOS / MoltenVK as a first-class target in this release line
 
 # Glossary

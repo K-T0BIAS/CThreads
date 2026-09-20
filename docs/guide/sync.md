@@ -39,7 +39,7 @@
 1. **Safe shared access** through locks (`Lock`, `RWLock`, `Event`, …)
 2. **Updating Python-side object state** from a running kernel so the main thread sees data at chosen points (or on request)
 
-Kernels run off the GIL on a C++ pack. Without sync tools, two jobs can corrupt shared data, and the host can read stale Python objects mid-run. See [concepts](../concepts.md) for the pack / writeback model, and [sync_state_docs](../sync_state_docs.md) for mid-run writeback details.
+Kernels run off the GIL on a C++ pack. Without sync tools, two jobs can corrupt shared data, and the host can read stale Python objects mid-run. See [concepts](../concepts.md) for the pack / writeback model.
 
 # Locks
 
@@ -128,7 +128,7 @@ print(counter.value)
 - Hold the lock only for the short critical section, not for the whole heavy compute if you can avoid it.
 - Always `release` on every path that acquired (including early returns). Prefer a clear acquire/release pair over long nested control flow.
 - One shared object -> one lock that all writers/readers of that object agree on. Two locks on the same data without a fixed order invites **deadlocks** (A holds L1 waits for L2; B holds L2 waits for L1).
-- Locks coordinate concurrent accessors. Mid-run **visibility on the Python host** still needs `job.sync_state()` / `__sync_state()` or join/await writeback ([sync_state_docs](../sync_state_docs.md)).
+- Locks coordinate concurrent accessors. Mid-run **visibility on the Python host** still needs `job.sync_state()` / `__sync_state()` or join/await writeback ([concepts](../concepts.md)).
 
 
 
@@ -308,8 +308,6 @@ You need state sync when:
 | `job.sync_state()` | Host Python | Host pulls pack -> Python while the job runs |
 | `TBuffer` | Kernel publishes; host/UI reads | High-rate frames without stopping the producer on every GUI tick |
 
-Deep internals (bridge, TLS, by-ref packs): [sync_state_docs.md](../sync_state_docs.md).
-
 ## Sync state from threads (`__sync_state()`)
 
 `__sync_state()` is a **kernel barrier**. Codegen turns it into a native call that copies the job's mutable pack args back into the Python objects that were passed to `thread` / `spawn`.
@@ -475,6 +473,5 @@ handle.destroy()
 ## See also
 
 * [concepts.md](../concepts.md) - pack / writeback overview
-* [sync_state_docs.md](../sync_state_docs.md) - bridge, TLS, by-ref packs
 * [math_and_linalg.md](./math_and_linalg.md) - arrays (separate from TBuffer)
 * [gpu/sync.md](./gpu/sync.md) - GPU workgroup barriers (`__sync_threads` / `Barrier.arrive_and_wait` inside `@Gpu`)

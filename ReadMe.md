@@ -5,17 +5,23 @@
 
 ----
 
-**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL**, allowing true concurrency without `multiprocessing`'s process boundaries and pickling tax. Optional **Vulkan GPU** kernels (`@Gpu`) ship as a separate install ( **`cthreads-gpu`**) same `import cthreads`, do not install alongside the CPU-only `cthreads` wheel.
+**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL**. That means true multi-core concurrency without `multiprocessing` process boundaries and pickling tax. Optional **Vulkan GPU** kernels (`@Gpu`) ship as **`cthreads-gpu`**: same `import cthreads`, do not install it alongside the CPU-only `cthreads` wheel.
 
-Use `@Thread` / `@Threadable` on the CPU path and `@Gpu` when you installed `cthreads-gpu`. The whitelist covers the usual scalars and containers, plus your own Threadable types. Code runs at native speed while you keep a Python-shaped control flow (jobs, pools, sync; GPU: `gpu()` / `join`).
+Use `@Thread` / `@Threadable` on the CPU path and `@Gpu` when you installed `cthreads-gpu`. The type whitelist covers scalars, containers, and your own Threadable types. You keep Python-shaped control flow (jobs, pools, sync; on GPU: `gpu()` / `join`).
+
+## Why cthreads
+
+CPU-bound Python `threading` still takes turns on the GIL. Multiprocessing can use multiple cores but pays process startup and data copying. cthreads keeps a Python job/pool/sync feel and runs compiled kernels off the GIL. The same product line can lower `@Gpu` kernels to Vulkan compute (SPIR-V) via `cthreads-gpu`.
+
+It is a typed subset (not full Python). It is not a drop-in NumPy replacement. Prefer it when you want native threads (and optional GPU) without leaving a Python-shaped API.
 
 | cthreads SPH | Python + NumPy SPH |
 |:---:|:---:|
-| realtime | linear speedup up to **100× realtime** on this scene |
+| realtime | linear speedup up to **100x realtime** on this scene |
 | <img src="./docs/__ressources/cthreads_w6.gif" width="360" alt="cthreads SPH simulation" /> | <img src="./docs/__ressources/numpy_w6.gif" width="360" alt="Python + NumPy SPH simulation" /> |
 
 **Fig. 1.** Side-by-side Smoothed Particle Hydrodynamics (SPH) fluid demo under identical scene setup (same particle set, forces, timestep, and camera).
-**Left:** dynamics advanced with **cthreads** (`@Thread` kernels on a `ThreadPool`, shared native buffers). **Right:** the same solver expressed as **Python + NumPy** array kernels on the host. Overlay text at the top of each clip reports live run metrics; the **second-to-last** value is **realtime speedup** (simulated time per unit wall-clock). On this scene the NumPy path reaches up to about **100× realtime**; the cthreads path is shown for visual parity of the fluid, not as a matched FPS bake-off in the GIF encode.
+**Left:** dynamics advanced with **cthreads** (`@Thread` kernels on a `ThreadPool`, shared native buffers). **Right:** the same solver expressed as **Python + NumPy** array kernels on the host. Overlay text at the top of each clip reports live run metrics; the **second-to-last** value is **realtime speedup** (simulated time per unit wall-clock). On this scene the NumPy path reaches up to about **100x realtime**; the cthreads path is shown for visual parity of the fluid, not as a matched FPS bake-off in the GIF encode.
 
 ---
 
@@ -26,14 +32,11 @@ Interactive CPU Mandelbrot (pool + Shared + TBuffer):
 
 ### Docs
 
-- [Install](./docs/install.md) (includes GPU / Vulkan notes)
-- [FAQ](./docs/FAQ.md) (pitfalls, marshal, GPU package split)
-- [Guides](./docs/index.md)
-- [GPU guides (0.2.0+)](./docs/guide/gpu/README.md)
-- [Release (GitHub / PyPI)](./docs/release.md)
-- [Math & linalg](./docs/guide/math_and_linalg.md)
-- [Compiler notes](./docs/COMPILER.md)
-- [Sync / state writeback](./docs/sync_state_docs.md)
+- [Install](./docs/install.md)
+- [FAQ](./docs/FAQ.md)
+- [CPU quickstart](./docs/quickstart.md) (reading map + basics)
+- [GPU quickstart](./docs/guide/gpu/quickstart.md)
+- [Guides catalog](./docs/index.md)
 - [API reference](./docs/API.md)
 
 ----
@@ -64,8 +67,6 @@ pip install -e ".[test]"   # or: pip install -e .
 ```
 
 First `cthreads.thread(...)` auto-runs cache-checked `prepare` + `load_kernels`. Call `unload_kernels()` before a force rebuild (`thread(..., force=True)` or `prepare(force=True)`).
-
-How we publish: [docs/release.md](./docs/release.md).
 
 ----
 

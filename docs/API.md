@@ -504,5 +504,5 @@ gpu(saxpy, len(x), 2.0, x, y).join()
 | `cthreads.sync.__sync_threads` / `Barrier.arrive_and_wait()` | Workgroup barrier inside `@Gpu` |
 
 GPU types are narrower than CPU: scalars and `list` of scalars only. No mid-run
-Python observe. Shared memory is planned for **0.2.1**.
+Python observe. Workgroup shared memory is planned for a later release.
 

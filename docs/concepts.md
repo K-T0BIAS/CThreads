@@ -56,7 +56,7 @@ Once launched, kernels run on real OS threads, outside the Python event loop and
 
 **Mental model:** Python args are **packed** (copied) into a C++ pack for the kernel. The kernel mutates the pack, not live Python objects. On join / await (and on explicit sync), the pack is written back into the Python objects that were passed as job args.
 
-One important caveat: during the run, Python-side memory is **not** live-updated with the C++ pack. For mid-run readouts use [`job.sync_state()` / `__sync_state()`](./sync_state_docs.md) and the [`cthreads.sync`](./guide/sync.md) tools.
+One important caveat: during the run, Python-side memory is **not** live-updated with the C++ pack. For mid-run readouts use `job.sync_state()` / `__sync_state()` and the [`cthreads.sync`](./guide/sync.md) tools.
 
 ## Rules
 
@@ -84,9 +84,9 @@ One important caveat: during the run, Python-side memory is **not** live-updated
 | Topic | Doc |
 |---|---|
 | Thread pools | [guide/pools.md](./guide/pools.md) |
-| Sync / locks / state | [guide/sync.md](./guide/sync.md), [sync_state_docs](./sync_state_docs.md) |
+| Sync / locks / state | [guide/sync.md](./guide/sync.md) |
 | Jobs / async | [guide/jobs.md](./guide/jobs.md) |
 | Math and linalg | [guide/math_and_linalg.md](./guide/math_and_linalg.md) |
-| GPU (`@Gpu` / `gpu()`, 0.2.0) | [guide/gpu/README.md](./guide/gpu/README.md) |
-| Compiler details | [COMPILER.md](./COMPILER.md) |
-| API surface | [README](../README.md), [API.md](./API.md) |
+| GPU (`@Gpu` / `gpu()`) | [guide/gpu/quickstart.md](./guide/gpu/quickstart.md) |
+| API surface | [API.md](./API.md) |
+| Full catalog | [index.md](./index.md) |

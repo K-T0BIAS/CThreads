@@ -396,9 +396,9 @@ Here every job would get its **own pack copy** unless you pass the same logical 
 
 ## Part 9 - Related docs
 
-- [sync_state_docs.md](../sync_state_docs.md) - TLS bridge and lock ordering
 - [guide/jobs.md](./jobs.md) - Job lifecycle from Python
 - [guide/sync.md](./sync.md) - TBuffer vs locks vs writeback
+- [guide/pools.md](./pools.md) - Shared waves on a ThreadPool
 
 ---
 

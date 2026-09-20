@@ -79,7 +79,7 @@ Product Python (`@Gpu` / `gpu()` / list writeback / arena / workgroup barriers)
 lives in `src/cthreads/python/cthreads/gpu/` and is documented for users in
 [guide/gpu](../../guide/gpu/README.md). Remaining substrate / dialect gaps include:
 
-- Workgroup shared memory (planned product **0.2.1**)
+- Workgroup shared memory (later product release)
 - Device atomics in the dialect
 - Threadable / nested object marshal on GPU
 - Inflight job store (header stub only)

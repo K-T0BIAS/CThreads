@@ -42,7 +42,7 @@ python -m pip install "cthreads[test]"
 pytest
 ```
 
-## From this repo (editable / contributors)
+## From this repo (editable install)
 
 Use a virtualenv. You can put **CMake and Ninja in the venv** so you do not need a system CMake:
 
@@ -215,19 +215,11 @@ Building with `CTHREADS_GPU=ON` needs Vulkan **headers** (LunarG SDK or distro
 `libvulkan-dev`). Runtime still loads the loader dynamically; end users need
 drivers, not the SDK.
 
-Release packaging (CPU + GPU wheels): [release.md](./release.md).
-More detail: [vk_guide/03-sdk-runtime-drivers.md](./vk_guide/03-sdk-runtime-drivers.md)
-and [guide/gpu/errors.md](./guide/gpu/errors.md).
-
-## Publishing to PyPI
-
-Wheels and the sdist are built on GitHub Actions when a GitHub Release is published.
-End users: `pip install cthreads` or `pip install cthreads-gpu`. Maintainer
-walkthrough: [release.md](./release.md).
+Troubleshooting GPU availability: [guide/gpu/errors.md](./guide/gpu/errors.md).
 
 ## Next
 
-- [README](../README.md) - `@Thread` / `@Threadable` and first `thread(...)` / `join` / `await`
+- [CPU quickstart](./quickstart.md) - types, decorators, compile, launch
+- [GPU quickstart](./guide/gpu/quickstart.md) - `@Gpu`, `gpu()`, arena
 - [concepts](./concepts.md) - GIL, pack / writeback, rules
-- [GPU guides](./guide/gpu/README.md) - `@Gpu`, `gpu()`, arena, barriers
-- [Guides](./index.md) - pools, sync, jobs, math
+- [Guides catalog](./index.md) - pools, sync, jobs, math

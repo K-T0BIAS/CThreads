@@ -2,7 +2,7 @@
 
 **Status:** Planned after the public Python GPU package (landed in **0.2.0**:
 `@Gpu`, `gpu()` / `GpuJob`, marshal, launch, join, writeback, `GpuArena`,
-workgroup barriers). Shared memory is tracked separately for **0.2.1**.
+workgroup barriers). Shared memory is tracked separately for a later release.
 
 This note records the intended design so we do not bolt on a second launch stack later. Write it as if the GPU runtime and Python `gpu()` path already exist; this feature only adds a native caller on top.
 

@@ -120,4 +120,4 @@ Full install context: [install.md](../../install.md#gpu-vulkan-compute).
 
 - [quickstart.md](./quickstart.md)
 - [api.md](./api.md)
-- Contributor Vulkan notes: [vk_guide/03-sdk-runtime-drivers.md](../../vk_guide/03-sdk-runtime-drivers.md)
+- [install.md](../../install.md#gpu-vulkan-compute)
