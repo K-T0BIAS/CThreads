@@ -264,4 +264,3 @@ Use the Colab notebook linked from the README (Open in Colab badge). It installs
 | Pools and Shared waves | [guide/pools.md](./guide/pools.md) |
 | Sync and TBuffer | [guide/sync.md](./guide/sync.md) |
 | GPU user guides | [guide/gpu/README.md](./guide/gpu/README.md) |
-| Discussions setup | [github_discussions.md](./github_discussions.md) |
