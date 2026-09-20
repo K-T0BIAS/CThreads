@@ -5,15 +5,15 @@
 
 ----
 
-**cthreads** compiles a typed Python subset into C++ so work can run on real OS threads **without the GIL**. That means true multi-core concurrency without `multiprocessing` process boundaries and pickling tax. Optional **Vulkan GPU** kernels (`@Gpu`) ship as **`cthreads-gpu`**: same `import cthreads`, do not install it alongside the CPU-only `cthreads` wheel.
+**cthreads** compiles a typed Python subset into **native kernels**: CPU via C++ (`@Thread` / `@Threadable`), optional GPU via Vulkan (`@Gpu`). You keep Python-shaped control flow (jobs, pools, sync, `await`) while the heavy work runs as **OS-native / on-device compute** in the background.
 
-Use `@Thread` / `@Threadable` on the CPU path and `@Gpu` when you installed `cthreads-gpu`. The type whitelist covers scalars, containers, and your own Threadable types. You keep Python-shaped control flow (jobs, pools, sync; on GPU: `gpu()` / `join`).
+GPU support ships as **`cthreads-gpu`** (same `import cthreads`; do not install it alongside the CPU-only `cthreads` wheel). The type whitelist covers scalars, containers, and your own Threadable types.
 
 ## Why cthreads
 
-CPU-bound Python `threading` still takes turns on the GIL. Multiprocessing can use multiple cores but pays process startup and data copying. cthreads keeps a Python job/pool/sync feel and runs compiled kernels off the GIL. The same product line can lower `@Gpu` kernels to Vulkan compute (SPIR-V) via `cthreads-gpu`.
+Hand-written C++/GLSL (or a full pybind project) is powerful but leaves the Python loop. `threading` stays on the GIL for CPU-bound bytecode; `multiprocessing` gets multi-core but pays process boundaries and pickling. cthreads sits in between: **annotate -> compile -> run** with the same job/pool/sync feel on CPU, and the same idea on GPU through `cthreads-gpu`.
 
-It is a typed subset (not full Python). It is not a drop-in NumPy replacement. Prefer it when you want native threads (and optional GPU) without leaving a Python-shaped API.
+It is a typed subset (not full Python). It is not a drop-in NumPy replacement. Prefer it when you want compiled native kernels without leaving a Python-shaped API.
 
 | cthreads SPH | Python + NumPy SPH |
 |:---:|:---:|

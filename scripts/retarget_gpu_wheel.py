@@ -23,7 +23,7 @@ def main() -> None:
     if 'name = "cthreads"' not in text:
         raise SystemExit("expected name = \"cthreads\" in pyproject.toml")
     text = text.replace('name = "cthreads"', 'name = "cthreads-gpu"', 1)
-    desc = 'description = "Typed Python to C++ threads (off the GIL). Jobs, pools, sync. Optional Vulkan @Gpu via cthreads-gpu."'
+    desc = 'description = "Typed Python compiled to native CPU (C++) and optional Vulkan GPU kernels. Jobs, pools, sync, await."'
     gpu_desc = (
         'description = "cthreads with Vulkan GPU (@Gpu) support built into _ext. '
         'Install via pip install cthreads-gpu (do not install alongside cthreads)."'
