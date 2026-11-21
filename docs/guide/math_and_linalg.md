@@ -282,7 +282,7 @@ Heavy-suite wall-clock comparison (`out.csv`): best-of-11, speedup = NumPy ms ÷
 | Large GEMM serial vs OpenBLAS | ~0.10× | ~0.10× |
 | Large GEMM `parallel=True` vs OpenBLAS | ~0.41–0.56× | ~0.47–0.56× |
 
-![cthreads.linalg vs NumPy](../__ressources/linalg_vs_numpy.svg)
+![cthreads.linalg vs NumPy](../__ressources/linalg_vs_numpy.png)
 
 | Family | f32 median | f64 median |
 |---|---:|---:|
