@@ -8,7 +8,7 @@ build-backend = "scikit_build_core.build"
 [project]
 readme = "ReadMe.md"
 name = "cthreads"
-version = "0.2.1"
+version = "0.2.2"
 description = "Typed Python compiled to native CPU (C++) and optional Vulkan GPU kernels. Jobs, pools, sync, await."
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
