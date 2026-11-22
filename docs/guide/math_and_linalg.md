@@ -279,8 +279,10 @@ Heavy-suite wall-clock comparison (`out.csv`): best-of-11, speedup = NumPy ms ÷
 | Median speedup (all cases) | 0.82× | 0.81× |
 | Cases where cthreads wins | 26 / 88 | 25 / 88 |
 | Ewise / compare (typical) | ~0.75–0.85× | ~0.65–0.85× |
-| Large GEMM serial vs OpenBLAS | ~0.10× | ~0.10× |
-| Large GEMM `parallel=True` vs OpenBLAS | ~0.41–0.56× | ~0.47–0.56× |
+| Large GEMM serial vs NumPy on all cores | ~0.33× | ~0.29× |
+| Large GEMM `parallel=True` vs NumPy on all cores | ~0.82× | ~0.82× |
+| Large GEMM, 1 thread each ([fair](#matmul-with-the-same-thread-count)) | 0.97–0.98× | 1.07–1.09× |
+| Large GEMM, same thread count each ([fair](#matmul-with-the-same-thread-count)) | 0.80–1.08× | 0.93–1.04× |
 
 ![cthreads.linalg vs NumPy](../__ressources/linalg_vs_numpy.png)
 
@@ -293,16 +295,57 @@ Heavy-suite wall-clock comparison (`out.csv`): best-of-11, speedup = NumPy ms ÷
 | Mask | **1.45×** | **1.41×** |
 | Dot | **7.29×** | **4.55×** |
 | Cross | **3.59×** | **3.80×** |
-| Matmul (serial) | 0.12× | 0.13× |
-| Matmul (`parallel=True`) | ~0.41–0.56× | ~0.47–0.56× |
+| Matmul (serial, NumPy on all cores) | 0.33× | 0.29× |
+| Matmul (`parallel=True`, NumPy on all cores) | ~0.82× | ~0.82× |
 
 **Strong:** row-wise dot, batched cross, mask select/count/fill.  
 **Close:** contiguous ewise / compare (AVX paths in the same league as NumPy).  
-**Matmul:** default `a.matmul(b)` stays single-threaded so it does not fight the thread pool (~0.10× vs vendor BLAS on large squares). Opt in with `a.matmul(b, parallel=True)` to panel-parallelize large GEMMs (`M*N*K` above ~67e6, using ~80% of hardware threads) - typically ~4–5× faster than serial and about half of NumPy/OpenBLAS on the heavy 2D shapes below.
+**Matmul:** default `a.matmul(b)` stays single-threaded so it does not fight the thread pool. Opt in with `a.matmul(b, parallel=True)` to panel-parallelize large GEMMs (`M*N*K` above ~67e6, using ~80% of hardware threads) - about 3–5× faster than serial on the heavy 2D shapes. The other matmul numbers on this page compare against NumPy on **all** its cores, so read them as "1 thread vs a whole CPU". For a like-for-like comparison see [same thread count](#matmul-with-the-same-thread-count).
+
+### Matmul with the same thread count
+
+The tables around this one compare against `a @ b` in NumPy, and NumPy uses **every core** by default (24 hardware threads on the test machine). A default `a.matmul(b)` uses **one**. So a number like 0.2× mostly says "1 thread vs 24 threads", not "slow kernel".
+
+For a fair comparison there is a second benchmark group, `matmul_fair`. It times every shape twice and gives NumPy the same thread count as cthreads:
+
+- **1 thread each:** NumPy limited to 1 BLAS thread vs `a.matmul(b)`. Kernel vs kernel.
+- **Same threads each:** NumPy limited to the thread count cthreads really uses vs `a.matmul(b, parallel=True)`. cthreads splits big results into column panels of 256, so a 1024 wide result gets 4 threads and a 2048 wide one gets 8.
+
+![cthreads matmul vs NumPy, same thread count](../__ressources/linalg_matmul_fair.png)
+
+Speedup = NumPy ms ÷ cthreads ms (best-of, **>1 means cthreads is faster**).
+
+**1 thread each**
+
+| Shape | f32 | f64 |
+|---|---:|---:|
+| 1024³ | 0.98× | **1.09×** |
+| 2048×1024×2048 | 0.97× | **1.07×** |
+| 2048³ | 0.97× | **1.07×** |
+| B8:256³ | 1.00× | **1.12×** |
+| B4:512³ | 1.00× | **1.11×** |
+
+**Same number of threads each**
+
+| Shape | Threads | f32 | f64 |
+|---|---:|---:|---:|
+| 1024³ | 4 | 0.80× | 0.93× |
+| 2048×1024×2048 | 8 | **1.08×** | **1.04×** |
+| 2048³ | 8 | 1.00× | **1.02×** |
+| B8:256³ | 1 | **1.01×** | **1.16×** |
+| B4:512³ | 2 | 0.82× | **1.07×** |
+
+B8:256³ (8 matrices) is under the ~67e6 `M*N*K` limit, so `parallel=True` stays on 1 thread there.
+
+**Even:** on 1 thread cthreads matches NumPy's BLAS. At 2048³ that is about 145 vs 150 GFLOP/s in f32 and 70 vs 66 in f64 (GFLOP/s = billions of float operations per second, higher is better).  
+**Ahead:** f64 in most rows, by up to 16%.  
+**Behind:** `parallel=True` on mid-size matrices. f32 is 0.80× at 1024³ and 0.82× on 4×512³, f64 is 0.93× at 1024³. The big 2048 sizes are level or ahead.
+
+One run on one machine, so treat gaps under ~3% as noise. Other CPUs will differ.
 
 ### Matmul serial vs `parallel=True` (heavy suite)
 
-Same NumPy `a @ b` baseline for both columns. Speedup = NumPy ms ÷ cthreads ms (best-of).
+Same NumPy `a @ b` baseline (all cores) for both columns. Speedup = NumPy ms ÷ cthreads ms (best-of).
 
 | Shape | f32 serial | f32 parallel | f64 serial | f64 parallel |
 |---|---:|---:|---:|---:|
@@ -335,15 +378,7 @@ Layout `flatten` / `reshape` can look 100–400× because cthreads returns a vie
 
 </details>
 
-### Reproduce
 
-```bash
-python docs/demos/linalg_benchmark/bench_linalg_vs_numpy.py --dtype both --suite heavy --csv out.csv
-# matmul only (serial + parallel rows):
-python docs/demos/linalg_benchmark/bench_linalg_vs_numpy.py --dtype both --suite heavy --ops matmul --csv out.csv
-```
-
-More detail: [linalg benchmark README](../demos/linalg_benchmark/README.md).
 
 # See also
 

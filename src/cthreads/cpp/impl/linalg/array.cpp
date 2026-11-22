@@ -800,8 +800,13 @@ void Array<T>::_fast_matmul_scalar(Array& out, const Array& lhs, const Array& rh
 
 namespace {
 
-// Cache panels + register microkernel (f32 4x16 / f64 4x8). No L1 probe.
+// Cache panels + register microkernel (f32 6x16 / f64 6x8). No L1 probe.
 // Larger Kc/Nc amortize pack cost on mid/large GEMM (aim: panels fit L2).
+// A and B get packed so the microkernel always works on full tiles:
+//  - A strip (6 rows of A): plain row copies, row r of the strip starts at a_pack + r * kc (kc values per row)
+//  - B panel (NR cols of B): value of col j at step k is at b_pack[k * NR + j] (so every step is NR values in a row)
+// rows / cols past the edge of the matrix are padded with 0 by the packing, so the kernel always does a full 6 x NR tile
+// rules: kGemmMc must be a multiple of kGemmMr and kGemmNc a multiple of NR (NR = 16 for f32, 8 for f64)
 constexpr size_t kGemmMc = 72; // OPTIM try 96
 constexpr size_t kGemmNc = 256;
 constexpr size_t kGemmKc = 256;
@@ -810,20 +815,25 @@ constexpr uint64_t kGemmParallelMnk = 64ull << 20; // ~67e6 mul-adds
 constexpr double kGemmParallelCoreFrac = 0.8;      // leave ~20% for OS / main / pool
 constexpr size_t kGemmMr = 6;
 
+template<typename T>
+T* aligned_data(std::vector<T>& v, size_t n) {
+    v.resize(n + 64 / sizeof(T)); // 64 bytes of extra room so we can always shift the start to a 64 byte boundary
+    auto addr = reinterpret_cast<uintptr_t>(v.data()); // where the vector memory starts
+    return reinterpret_cast<T*>((addr + 63) & ~uintptr_t(63)); // round the address up to the next multiple of 64
+}
+
 #ifdef __AVX2__
 constexpr size_t kGemmNrF32 = 16; // Num float cols per micro tile (mtile)
 constexpr size_t kGemmNrF64 = 8;  // Num doubles cols per mtile
 
-// C[6 x 16] += A_pack[6 x kc] @ B_pack[kc x nc] at column offset jj (nr=16).
-// first_k: beta=0 (zero acc) - out is freshly allocated zeros on the first Kc panel.
+// C[6 x 16] += A_pack[6 x kc] @ B_pack[kc x 16] (nr=16).
+// first_k: beta=0 (zero acc) - out gets overwritten instead of added to.
 void gemm_kernel_f32_6x16(
-    float* c, // pointer to the start of the 6 row strip in C
+    float* c, // pointer to the top left of the 6x16 tile in C
     size_t ldc, // row offset of C (moving rows down moves by ldc)
-    const float* a_pack, // the 6xkc chunk in A (row maj)
-    const float* b_pack, // the kcxnc chunk in B (offset nc in rows) (row maj)
-    size_t kc, // inner steps (num accumulation steps on the inner dim)
-    size_t nc, // the row offset (stride) in B
-    size_t jj, // col offset of C and B in this 16 col mtile
+    const float* a_pack, // the packed 6 row strip of A (6 rows with kc values each, row-major)
+    const float* b_pack, // the packed 16 col panel of B (kc steps with 16 values each)
+    size_t kc, // inner steps (num accumulation steps on the inner dim) and also the row length of the A strip
     bool first_k // if this is the first write to this C position (start new accumulator at 0)
 ) {
     // the C registers (6x16) avx2 has registers with 8 floats ->
@@ -834,74 +844,77 @@ void gemm_kernel_f32_6x16(
         c00 = c01 = c10 = c11 = c20 = c21 = _mm256_setzero_ps();
         c30 = c31 = c40 = c41 = c50 = c51 = _mm256_setzero_ps();
     } else { // copy the current accumulated val from C
-        c00 = _mm256_loadu_ps(c + 0 * ldc + jj);
-        c01 = _mm256_loadu_ps(c + 0 * ldc + jj + 8);
-        c10 = _mm256_loadu_ps(c + 1 * ldc + jj);
-        c11 = _mm256_loadu_ps(c + 1 * ldc + jj + 8);
-        c20 = _mm256_loadu_ps(c + 2 * ldc + jj);
-        c21 = _mm256_loadu_ps(c + 2 * ldc + jj + 8);
-        c30 = _mm256_loadu_ps(c + 3 * ldc + jj);
-        c31 = _mm256_loadu_ps(c + 3 * ldc + jj + 8);
-        c40 = _mm256_loadu_ps(c + 4 * ldc + jj);
-        c41 = _mm256_loadu_ps(c + 4 * ldc + jj + 8);
-        c50 = _mm256_loadu_ps(c + 5 * ldc + jj);
-        c51 = _mm256_loadu_ps(c + 5 * ldc + jj + 8);
+        c00 = _mm256_loadu_ps(c + 0 * ldc); // row 0, first 8 cols
+        c01 = _mm256_loadu_ps(c + 0 * ldc + 8); // row 0, last 8 cols
+        c10 = _mm256_loadu_ps(c + 1 * ldc);
+        c11 = _mm256_loadu_ps(c + 1 * ldc + 8);
+        c20 = _mm256_loadu_ps(c + 2 * ldc);
+        c21 = _mm256_loadu_ps(c + 2 * ldc + 8);
+        c30 = _mm256_loadu_ps(c + 3 * ldc);
+        c31 = _mm256_loadu_ps(c + 3 * ldc + 8);
+        c40 = _mm256_loadu_ps(c + 4 * ldc);
+        c41 = _mm256_loadu_ps(c + 4 * ldc + 8);
+        c50 = _mm256_loadu_ps(c + 5 * ldc);
+        c51 = _mm256_loadu_ps(c + 5 * ldc + 8);
     }
     /**
-- The actual matmul loop:
--  b0, b1 -> load 16 floats from row k of mtile B (b0 first 8 b1 last 8)
--  a0, a1 -> reused broadcast regs for row chunks in mtile A (keeps total YMMs <= 16)
-     */
+    * - The actual matmul loop:
+    * -  b0, b1 -> the 16 floats of step k in the B panel (b0 first 8 b1 last 8)
+    * -  a0, a1 -> reused broadcast regs for the 6 values of step k in the A strip (keeps total YMMs <= 16)
+    */
+    const float* ap = a_pack; // points at step k of row 0 in the A strip (row r is r * kc further)
+    const float* bp = b_pack; // walks through the B panel, 16 values per step
     for (size_t k = 0; k < kc; ++k) {
-        const __m256 b0 = _mm256_loadu_ps(b_pack + k * nc + jj);
-        const __m256 b1 = _mm256_loadu_ps(b_pack + k * nc + jj + 8);
+        const __m256 b0 = _mm256_loadu_ps(bp); // first 8 floats of this step in B
+        const __m256 b1 = _mm256_loadu_ps(bp + 8); // last 8 floats of this step in B
 
-        __m256 a0 = _mm256_set1_ps(a_pack[0 * kc + k]);
-        __m256 a1 = _mm256_set1_ps(a_pack[1 * kc + k]);
+        __m256 a0 = _mm256_broadcast_ss(ap + 0 * kc); // row 0 of A copied into all 8 lanes
+        __m256 a1 = _mm256_broadcast_ss(ap + 1 * kc); // row 1 of A copied into all 8 lanes
         c00 = _mm256_fmadd_ps(a0, b0, c00); // a*b+c
         c01 = _mm256_fmadd_ps(a0, b1, c01);
         c10 = _mm256_fmadd_ps(a1, b0, c10);
         c11 = _mm256_fmadd_ps(a1, b1, c11);
 
-        a0 = _mm256_set1_ps(a_pack[2 * kc + k]);
-        a1 = _mm256_set1_ps(a_pack[3 * kc + k]);
+        a0 = _mm256_broadcast_ss(ap + 2 * kc); // reuse the regs for rows 2 and 3
+        a1 = _mm256_broadcast_ss(ap + 3 * kc);
         c20 = _mm256_fmadd_ps(a0, b0, c20);
         c21 = _mm256_fmadd_ps(a0, b1, c21);
         c30 = _mm256_fmadd_ps(a1, b0, c30);
         c31 = _mm256_fmadd_ps(a1, b1, c31);
 
-        a0 = _mm256_set1_ps(a_pack[4 * kc + k]);
-        a1 = _mm256_set1_ps(a_pack[5 * kc + k]);
+        a0 = _mm256_broadcast_ss(ap + 4 * kc); // and again for rows 4 and 5
+        a1 = _mm256_broadcast_ss(ap + 5 * kc);
         c40 = _mm256_fmadd_ps(a0, b0, c40);
         c41 = _mm256_fmadd_ps(a0, b1, c41);
         c50 = _mm256_fmadd_ps(a1, b0, c50);
         c51 = _mm256_fmadd_ps(a1, b1, c51);
+
+        ap += 1; // next step in the A strip (every row moves by 1)
+        bp += 16; // next step in the B panel (16 cols)
     }
     // move the cij register data to C
-    _mm256_storeu_ps(c + 0 * ldc + jj, c00);
-    _mm256_storeu_ps(c + 0 * ldc + jj + 8, c01);
-    _mm256_storeu_ps(c + 1 * ldc + jj, c10);
-    _mm256_storeu_ps(c + 1 * ldc + jj + 8, c11);
-    _mm256_storeu_ps(c + 2 * ldc + jj, c20);
-    _mm256_storeu_ps(c + 2 * ldc + jj + 8, c21);
-    _mm256_storeu_ps(c + 3 * ldc + jj, c30);
-    _mm256_storeu_ps(c + 3 * ldc + jj + 8, c31);
-    _mm256_storeu_ps(c + 4 * ldc + jj, c40);
-    _mm256_storeu_ps(c + 4 * ldc + jj + 8, c41);
-    _mm256_storeu_ps(c + 5 * ldc + jj, c50);
-    _mm256_storeu_ps(c + 5 * ldc + jj + 8, c51);
+    _mm256_storeu_ps(c + 0 * ldc, c00);
+    _mm256_storeu_ps(c + 0 * ldc + 8, c01);
+    _mm256_storeu_ps(c + 1 * ldc, c10);
+    _mm256_storeu_ps(c + 1 * ldc + 8, c11);
+    _mm256_storeu_ps(c + 2 * ldc, c20);
+    _mm256_storeu_ps(c + 2 * ldc + 8, c21);
+    _mm256_storeu_ps(c + 3 * ldc, c30);
+    _mm256_storeu_ps(c + 3 * ldc + 8, c31);
+    _mm256_storeu_ps(c + 4 * ldc, c40);
+    _mm256_storeu_ps(c + 4 * ldc + 8, c41);
+    _mm256_storeu_ps(c + 5 * ldc, c50);
+    _mm256_storeu_ps(c + 5 * ldc + 8, c51);
 }
 
-// C[6 x 8] += A_pack[6 x kc] @ B_pack[kc x nc] at column offset jj (nr=8).
-// first_k: beta=0 (zero acc) - out is freshly allocated zeros on the first Kc panel.
+// C[6 x 8] += A_pack[6 x kc] @ B_pack[kc x 8] (nr=8).
+// first_k: beta=0 (zero acc) - out gets overwritten instead of added to.
 void gemm_kernel_f64_6x8(
-    double* c, // pointer to the start of the 6 row strip in C
+    double* c, // pointer to the top left of the 6x8 tile in C
     size_t ldc, // row offset of C (moving rows down moves by ldc)
-    const double* a_pack, // the 6xkc chunk in A (row maj)
-    const double* b_pack, // the kcxnc chunk in B (offset nc in rows) (row maj)
-    size_t kc, // inner steps (num accumulation steps on the inner dim)
-    size_t nc, // the row offset (stride) in B
-    size_t jj, // col offset of C and B in this 8 col mtile
+    const double* a_pack, // the packed 6 row strip of A (6 rows with kc values each, row-major)
+    const double* b_pack, // the packed 8 col panel of B (kc steps with 8 values each)
+    size_t kc, // inner steps (num accumulation steps on the inner dim) and also the row length of the A strip
     bool first_k // if this is the first write to this C position (start new accumulator at 0)
 ) {
     // the C registers (6x8) avx2 has registers with 4 doubles ->
@@ -912,62 +925,67 @@ void gemm_kernel_f64_6x8(
         c00 = c01 = c10 = c11 = c20 = c21 = _mm256_setzero_pd();
         c30 = c31 = c40 = c41 = c50 = c51 = _mm256_setzero_pd();
     } else { // copy the current accumulated val from C
-        c00 = _mm256_loadu_pd(c + 0 * ldc + jj);
-        c01 = _mm256_loadu_pd(c + 0 * ldc + jj + 4);
-        c10 = _mm256_loadu_pd(c + 1 * ldc + jj);
-        c11 = _mm256_loadu_pd(c + 1 * ldc + jj + 4);
-        c20 = _mm256_loadu_pd(c + 2 * ldc + jj);
-        c21 = _mm256_loadu_pd(c + 2 * ldc + jj + 4);
-        c30 = _mm256_loadu_pd(c + 3 * ldc + jj);
-        c31 = _mm256_loadu_pd(c + 3 * ldc + jj + 4);
-        c40 = _mm256_loadu_pd(c + 4 * ldc + jj);
-        c41 = _mm256_loadu_pd(c + 4 * ldc + jj + 4);
-        c50 = _mm256_loadu_pd(c + 5 * ldc + jj);
-        c51 = _mm256_loadu_pd(c + 5 * ldc + jj + 4);
+        c00 = _mm256_loadu_pd(c + 0 * ldc); // row 0, first 4 cols
+        c01 = _mm256_loadu_pd(c + 0 * ldc + 4); // row 0, last 4 cols
+        c10 = _mm256_loadu_pd(c + 1 * ldc);
+        c11 = _mm256_loadu_pd(c + 1 * ldc + 4);
+        c20 = _mm256_loadu_pd(c + 2 * ldc);
+        c21 = _mm256_loadu_pd(c + 2 * ldc + 4);
+        c30 = _mm256_loadu_pd(c + 3 * ldc);
+        c31 = _mm256_loadu_pd(c + 3 * ldc + 4);
+        c40 = _mm256_loadu_pd(c + 4 * ldc);
+        c41 = _mm256_loadu_pd(c + 4 * ldc + 4);
+        c50 = _mm256_loadu_pd(c + 5 * ldc);
+        c51 = _mm256_loadu_pd(c + 5 * ldc + 4);
     }
     /**
-- The actual matmul loop:
--  b0, b1 -> load 8 doubles from row k of mtile B (b0 first 4 b1 last 4)
--  a0, a1 -> reused broadcast regs for row chunks in mtile A (keeps total YMMs <= 16)
+    * - The actual matmul loop:
+    * -  b0, b1 -> the 8 doubles of step k in the B panel (b0 first 4 b1 last 4)
+    * -  a0, a1 -> reused broadcast regs for the 6 values of step k in the A strip (keeps total YMMs <= 16)
      */
+    const double* ap = a_pack; // points at step k of row 0 in the A strip (row r is r * kc further)
+    const double* bp = b_pack; // walks through the B panel, 8 values per step
     for (size_t k = 0; k < kc; ++k) {
-        const __m256d b0 = _mm256_loadu_pd(b_pack + k * nc + jj);
-        const __m256d b1 = _mm256_loadu_pd(b_pack + k * nc + jj + 4);
+        const __m256d b0 = _mm256_loadu_pd(bp); // first 4 doubles of this step in B
+        const __m256d b1 = _mm256_loadu_pd(bp + 4); // last 4 doubles of this step in B
 
-        __m256d a0 = _mm256_set1_pd(a_pack[0 * kc + k]);
-        __m256d a1 = _mm256_set1_pd(a_pack[1 * kc + k]);
+        __m256d a0 = _mm256_broadcast_sd(ap + 0 * kc); // row 0 of A copied into all 4 lanes
+        __m256d a1 = _mm256_broadcast_sd(ap + 1 * kc); // row 1 of A copied into all 4 lanes
         c00 = _mm256_fmadd_pd(a0, b0, c00); // a*b+c
         c01 = _mm256_fmadd_pd(a0, b1, c01);
         c10 = _mm256_fmadd_pd(a1, b0, c10);
         c11 = _mm256_fmadd_pd(a1, b1, c11);
 
-        a0 = _mm256_set1_pd(a_pack[2 * kc + k]);
-        a1 = _mm256_set1_pd(a_pack[3 * kc + k]);
+        a0 = _mm256_broadcast_sd(ap + 2 * kc); // reuse the regs for rows 2 and 3
+        a1 = _mm256_broadcast_sd(ap + 3 * kc);
         c20 = _mm256_fmadd_pd(a0, b0, c20);
         c21 = _mm256_fmadd_pd(a0, b1, c21);
         c30 = _mm256_fmadd_pd(a1, b0, c30);
         c31 = _mm256_fmadd_pd(a1, b1, c31);
 
-        a0 = _mm256_set1_pd(a_pack[4 * kc + k]);
-        a1 = _mm256_set1_pd(a_pack[5 * kc + k]);
+        a0 = _mm256_broadcast_sd(ap + 4 * kc); // and again for rows 4 and 5
+        a1 = _mm256_broadcast_sd(ap + 5 * kc);
         c40 = _mm256_fmadd_pd(a0, b0, c40);
         c41 = _mm256_fmadd_pd(a0, b1, c41);
         c50 = _mm256_fmadd_pd(a1, b0, c50); // a*b+c
         c51 = _mm256_fmadd_pd(a1, b1, c51);
+
+        ap += 1; // next step in the A strip (every row moves by 1)
+        bp += 8; // next step in the B panel (8 cols)
     }
     // move the cij register data to C
-    _mm256_storeu_pd(c + 0 * ldc + jj, c00);
-    _mm256_storeu_pd(c + 0 * ldc + jj + 4, c01);
-    _mm256_storeu_pd(c + 1 * ldc + jj, c10);
-    _mm256_storeu_pd(c + 1 * ldc + jj + 4, c11);
-    _mm256_storeu_pd(c + 2 * ldc + jj, c20);
-    _mm256_storeu_pd(c + 2 * ldc + jj + 4, c21);
-    _mm256_storeu_pd(c + 3 * ldc + jj, c30);
-    _mm256_storeu_pd(c + 3 * ldc + jj + 4, c31);
-    _mm256_storeu_pd(c + 4 * ldc + jj, c40);
-    _mm256_storeu_pd(c + 4 * ldc + jj + 4, c41);
-    _mm256_storeu_pd(c + 5 * ldc + jj, c50);
-    _mm256_storeu_pd(c + 5 * ldc + jj + 4, c51);
+    _mm256_storeu_pd(c + 0 * ldc, c00);
+    _mm256_storeu_pd(c + 0 * ldc + 4, c01);
+    _mm256_storeu_pd(c + 1 * ldc, c10);
+    _mm256_storeu_pd(c + 1 * ldc + 4, c11);
+    _mm256_storeu_pd(c + 2 * ldc, c20);
+    _mm256_storeu_pd(c + 2 * ldc + 4, c21);
+    _mm256_storeu_pd(c + 3 * ldc, c30);
+    _mm256_storeu_pd(c + 3 * ldc + 4, c31);
+    _mm256_storeu_pd(c + 4 * ldc, c40);
+    _mm256_storeu_pd(c + 4 * ldc + 4, c41);
+    _mm256_storeu_pd(c + 5 * ldc, c50);
+    _mm256_storeu_pd(c + 5 * ldc + 4, c51);
 }
 
 void gemm_kernel_f32_1x16(
@@ -1017,7 +1035,7 @@ void gemm_kernel_f64_1x8(
 #endif
 
 // Contiguous row-major GEMM over C columns [j0_begin, j0_end).
-// Panel pack + 4x16/4x8 microkernel; thread_local Mc×Kc / Kc×Nc scratch.
+// Panel pack + 6x16/6x8 microkernel; thread_local Mc×Kc / Kc×Nc scratch.
 template<typename T>
 void gemm_tiled_j_range(
     T* c, // output array pointer
@@ -1029,153 +1047,147 @@ void gemm_tiled_j_range(
     size_t j0_begin, // Inclusive starting column index in C and B assigned to this call/thread.
     size_t j0_end // Exclusive ending column index in C and B assigned to this call/thread.
 ) {
-    thread_local std::vector<T> a_pack_tl; // per therad working scratch buffer for A (lhs)      OPTIM: maybe make this an array ANSWER: neglible CPU cycles lost (ns range)
+    thread_local std::vector<T> a_pack_tl; // per therad working scratch buffer for A (lhs)
     thread_local std::vector<T> b_pack_tl; // per therad working scratch buffer for B (rhs)
-    a_pack_tl.resize(kGemmMc * kGemmKc); // OPTIM: slow ish resize, calloced array faster? ANSWER: same as above. ns loss -> neglible for now
-    b_pack_tl.resize(kGemmKc * kGemmNc);
-    T* a_pack = a_pack_tl.data(); // pointer into the thread local lhs buffer for A    OPTIM: unnecessary copy? ANSSER: theres no copy here just a pointer return (compiler optim may even reduce this to 1 fetch op)
-    T* b_pack = b_pack_tl.data(); // pointer into the thread local rhs buffer for B
+    T* a_pack = aligned_data(a_pack_tl, kGemmMc * kGemmKc); // 64 byte aligned pointer into the A buffer
+    T* b_pack = aligned_data(b_pack_tl, kGemmKc * kGemmNc); // 64 byte aligned pointer into the B buffer
+
+    // num cols in one B panel = num cols the microkernel does at once (16 floats or 8 doubles = 2 avx2 regs)
+    constexpr size_t NR = std::is_same_v<T, float> ? 16 : 8;
+    static_assert(kGemmMc % kGemmMr == 0, "Mc must be a multiple of Mr"); // else the padded A block would not fit the buffer
+    static_assert(kGemmNc % NR == 0, "Nc must be a multiple of NR"); // else the padded B block would not fit the buffer
 
     /**
      * geometry:
      *  - A: M x K
      *  - B: K x N
      *  - C: M x N
-     *  - tile: C': 4 × 16
-     *          A': 4 × kc
-     *          B': kc × 16
+     *  - tile: C': 6 × NR
+     *          A': 6 × kc   (6 rows, row-major)
+     *          B': kc × NR  (packed, NR values per step)
      */
 
     // loop over the block (block = matrix of tiles)
-    // start at this threads assigned col (j0_begin) and step in increments of kGemmNc (8 or 16))
+    // start at this threads assigned col (j0_begin) and step in increments of kGemmNc
     for (size_t j0 = j0_begin; j0 < j0_end; j0 += kGemmNc) {
         // nc = num cols in this tile (either kGemmNc or the remainder of the block)
         const size_t nc = std::min(kGemmNc, j0_end - j0);
-        // loop over the cols of this tile in increments of kGemmKc (256)
+        // loop over the inner dim in increments of kGemmKc (256)
         for (size_t k0 = 0; k0 < K; k0 += kGemmKc) { // k0 = start of the current slice (inner)
-            const size_t kc = std::min(kGemmKc, K - k0); // n cols of this tile
+            const size_t kc = std::min(kGemmKc, K - k0); // n inner steps of this slice
             const bool first_k = (k0 == 0); // check if we are at the start of the block
 
-            // OPTIM: pack into contiguous col major to impove cache and indexing
-            for (size_t k = 0; k < kc; ++k) { // itter inner 
-                std::memcpy( // memcpy instead of direct write, why?
-                    b_pack + k * nc, // index rows of B (rhs)
-                    b + (k0 + k) * N + j0, // write data from the real B (rhs) into the slot
-                    nc * sizeof(T)
-                );
+            // pack B into panels of NR cols
+            // panel number jj/NR starts at b_pack + (jj/NR)*kc*NR, it has kc steps with NR contiguous values each
+            for (size_t jj = 0; jj < nc; jj += NR) { // jj = start col of this panel inside the nc block
+                const size_t w = std::min(NR, nc - jj); // real cols in this panel (only the last panel can have less than NR)
+                T* d = b_pack + (jj / NR) * kc * NR; // where this panel starts in b_pack
+                const T* s = b + k0 * N + j0 + jj; // where this panel starts in the real B (row k0, col j0 + jj)
+                for (size_t k = 0; k < kc; ++k, d += NR, s += N) { // next step -> next slot in the panel (NR) and next row in B (N)
+                    if (w == NR) { // full panel -> copy has a fixed size (compiler turns it into plain vector moves)
+                        std::memcpy(d, s, NR * sizeof(T));
+                    } else { // last panel
+                        std::memcpy(d, s, w * sizeof(T)); // copy the real cols
+                        for (size_t j = w; j < NR; ++j) d[j] = T{}; // fill the rest with 0
+                    }
+                }
             }
 
             // OPTIM: this doesnt need j0 directly so it can be reused on every k0 reset
             // ANSWER: this cant be solved ... without loosing the perf elsewhere (cache)
             for (size_t i0 = 0; i0 < M; i0 += kGemmMc) {
                 const size_t mc = std::min(kGemmMc, M - i0); // n rows of this tile
+
+                // pack A: every row is a plain copy of kc values (memcpy is the fastest way to do this)
+                // row i of the mc block sits at a_pack + i * kc, so the 6 row strip starting at row ii sits at a_pack + ii * kc
                 for (size_t i = 0; i < mc; ++i) { // iter lhs rows of this tile
-                    std::memcpy( // memcpy instead of direct write, why?
-                        a_pack + i * kc,
-                        a + (i0 + i) * K + k0,
-                        kc * sizeof(T)
-                    );
+                    std::memcpy(a_pack + i * kc, a + (i0 + i) * K + k0, kc * sizeof(T));
+                }
+                // the last strip can have less than 6 rows -> fill the missing rows with 0
+                for (size_t i = mc; i % kGemmMr != 0; ++i) {
+                    std::memset(a_pack + i * kc, 0, kc * sizeof(T));
                 }
 
 #ifdef __AVX2__
                 if constexpr (std::is_same_v<T, float>) { // float
-                    size_t ii = 0; 
-                    // iter the lhs rows in steps of 4 (kGemmMr) and call the 4x16 microkernel
-                    for (; ii + kGemmMr <= mc; ii += kGemmMr) {
-                        // c is data ptr to index 0 of C, i0 is the current row chunk of A, 
-                        // ii is the offset into the current row chunk of A
-                        // N is the number of columns in B and C (the row stride of C, since C is M × N row-major). K is the number of rows in B.
-                        float* c_block = c + (i0 + ii) * N + j0; // the location C_i,j that we add to
-                        const float* ap = a_pack + ii * kc; // the start of the cchunk in A (ii is row offset and kc the inner (col) offset)
-                        size_t jj = 0; // col offset into B
-                        // iter the cols in B in chunks where jj is start and chunksize = kGemmNrF32 (16)
-                        for (; jj + kGemmNrF32 <= nc; jj += kGemmNrF32) {
-                            // add sum of the sub matrices into the C block (4x16) using the microkernel
-                            gemm_kernel_f32_6x16(c_block, N, ap, b_pack, kc, nc, jj, first_k);
-                        }
-                        // handle the remainder of the cols sequentially
-                        for (; jj < nc; ++jj) {
-                            for (size_t r = 0; r < kGemmMr; ++r) {
-                                float sum = first_k ? 0.f : c_block[r * N + jj];
-                                for (size_t k = 0; k < kc; ++k) {
-                                    sum += ap[r * kc + k] * b_pack[k * nc + jj];
+                    alignas(32) float tmp[kGemmMr * NR]; // scratch tile for the edge tiles
+                    // iter the rows of the A block in strips of 6 (kGemmMr)
+                    for (size_t ii = 0; ii < mc; ii += kGemmMr) {
+                        const float* ap = a_pack + ii * kc; // start of this strip in a_pack
+                        const size_t h = std::min(kGemmMr, mc - ii); // real rows in this strip
+                        // iter the cols of the B block in panels of NR (16)
+                        // the C tiles of one strip sit next to each other in memory (same 6 rows of C)
+                        for (size_t jj = 0; jj < nc; jj += NR) {
+                            const float* bp = b_pack + (jj / NR) * kc * NR; // start of this panel in b_pack
+                            const size_t w = std::min(NR, nc - jj); // real cols in this panel
+                            // c is data ptr to index 0 of C, i0 + ii is the row and j0 + jj the col of the tile
+                            // N is the row stride of C (C is M × N row-major)
+                            float* ct = c + (i0 + ii) * N + j0 + jj; // the location C_i,j that we add to
+                            if (h == kGemmMr && w == NR) { // full tile
+                                // add sum of the sub matrices into the C block (6x16) using the microkernel
+                                gemm_kernel_f32_6x16(ct, N, ap, bp, kc, first_k);
+                            } else { // edge tile (not enough rows or cols left)
+                                // do the full 6x16 into the scratch tile (first_k = true so it starts at 0)
+                                gemm_kernel_f32_6x16(tmp, NR, ap, bp, kc, true);
+                                // then copy only the real h x w part into C
+                                for (size_t r = 0; r < h; ++r) {
+                                    for (size_t j = 0; j < w; ++j) {
+                                        float& dst = ct[r * N + j]; // this elem in C
+                                        // first slice: overwrite, later slices: add to what is already there
+                                        dst = first_k ? tmp[r * NR + j] : dst + tmp[r * NR + j];
+                                    }
                                 }
-                                c_block[r * N + jj] = sum;
                             }
                         }
                     }
-                    // handle the remainder of the rows sequentially
-                    // rpeats what the above loop does in tiles
-                    for (; ii < mc; ++ii) {
-                        float* c_row = c + (i0 + ii) * N + j0;
-                        const float* ap = a_pack + ii * kc;
-                        size_t jj = 0;
-                        for (; jj + kGemmNrF32 <= nc; jj += kGemmNrF32) {
-                            gemm_kernel_f32_1x16(c_row, ap, b_pack, kc, nc, jj, first_k);
-                        }
-                        for (; jj < nc; ++jj) {
-                            float sum = first_k ? 0.f : c_row[jj];
-                            for (size_t k = 0; k < kc; ++k) {
-                                sum += ap[k] * b_pack[k * nc + jj];
-                            }
-                            c_row[jj] = sum;
-                        }
-                    }
-                } else if constexpr (std::is_same_v<T, double>) {
-                    size_t ii = 0;
-                    for (; ii + kGemmMr <= mc; ii += kGemmMr) {
-                        double* c_block = c + (i0 + ii) * N + j0;
-                        const double* ap = a_pack + ii * kc;
-                        size_t jj = 0;
-                        for (; jj + kGemmNrF64 <= nc; jj += kGemmNrF64) {
-                            gemm_kernel_f64_6x8(c_block, N, ap, b_pack, kc, nc, jj, first_k);
-                        }
-                        for (; jj < nc; ++jj) {
-                            for (size_t r = 0; r < kGemmMr; ++r) {
-                                double sum = first_k ? 0.0 : c_block[r * N + jj];
-                                for (size_t k = 0; k < kc; ++k) {
-                                    sum += ap[r * kc + k] * b_pack[k * nc + jj];
+                } else if constexpr (std::is_same_v<T, double>) { // double
+                    alignas(32) double tmp[kGemmMr * NR]; // scratch tile for the edge tiles
+                    // same as the float version but with 6x8 tiles
+                    for (size_t ii = 0; ii < mc; ii += kGemmMr) {
+                        const double* ap = a_pack + ii * kc; // start of this strip in a_pack
+                        const size_t h = std::min(kGemmMr, mc - ii); // real rows in this strip
+                        for (size_t jj = 0; jj < nc; jj += NR) {
+                            const double* bp = b_pack + (jj / NR) * kc * NR; // start of this panel in b_pack
+                            const size_t w = std::min(NR, nc - jj); // real cols in this panel
+                            double* ct = c + (i0 + ii) * N + j0 + jj; // the location C_i,j that we add to
+                            if (h == kGemmMr && w == NR) { // full tile
+                                gemm_kernel_f64_6x8(ct, N, ap, bp, kc, first_k);
+                            } else { // edge tile
+                                gemm_kernel_f64_6x8(tmp, NR, ap, bp, kc, true); // full tile into scratch
+                                for (size_t r = 0; r < h; ++r) {
+                                    for (size_t j = 0; j < w; ++j) {
+                                        double& dst = ct[r * N + j]; // this elem in C
+                                        dst = first_k ? tmp[r * NR + j] : dst + tmp[r * NR + j];
+                                    }
                                 }
-                                c_block[r * N + jj] = sum;
                             }
-                        }
-                    }
-                    for (; ii < mc; ++ii) {
-                        double* c_row = c + (i0 + ii) * N + j0;
-                        const double* ap = a_pack + ii * kc;
-                        size_t jj = 0;
-                        for (; jj + kGemmNrF64 <= nc; jj += kGemmNrF64) {
-                            gemm_kernel_f64_1x8(c_row, ap, b_pack, kc, nc, jj, first_k);
-                        }
-                        for (; jj < nc; ++jj) {
-                            double sum = first_k ? 0.0 : c_row[jj];
-                            for (size_t k = 0; k < kc; ++k) {
-                                sum += ap[k] * b_pack[k * nc + jj];
-                            }
-                            c_row[jj] = sum;
                         }
                     }
                 } else { // fallback naive sequential implementation for unsupported types
-                    for (size_t i = 0; i < mc; ++i) {
+                    for (size_t i = 0; i < mc; ++i) { // iter lhs rows of this tile
                         T* c_row = c + (i0 + i) * N + j0;
-                        const T* ap = a_pack + i * kc;
+                        const T* ap = a_pack + i * kc; // row i of the A block
                         for (size_t j = 0; j < nc; ++j) {
+                            // col j sits in panel j/NR at position j%NR, steps are NR apart
+                            const T* bp = b_pack + (j / NR) * kc * NR + (j % NR);
                             T sum = first_k ? T{} : c_row[j];
                             for (size_t k = 0; k < kc; ++k) {
-                                sum += ap[k] * b_pack[k * nc + j];
+                                sum += ap[k] * bp[k * NR];
                             }
                             c_row[j] = sum;
                         }
                     }
                 }
 #else            // fallback naive sequential implementation for unsupported types when no AVX2
-                for (size_t i = 0; i < mc; ++i) {
+                for (size_t i = 0; i < mc; ++i) { // iter lhs rows of this tile
                     T* c_row = c + (i0 + i) * N + j0;
-                    const T* ap = a_pack + i * kc;
+                    const T* ap = a_pack + i * kc; // row i of the A block
                     for (size_t j = 0; j < nc; ++j) {
+                        // col j sits in panel j/NR at position j%NR, steps are NR apart
+                        const T* bp = b_pack + (j / NR) * kc * NR + (j % NR);
                         T sum = first_k ? T{} : c_row[j];
                         for (size_t k = 0; k < kc; ++k) {
-                            sum += ap[k] * b_pack[k * nc + j];
+                            sum += ap[k] * bp[k * NR];
                         }
                         c_row[j] = sum;
                     }
